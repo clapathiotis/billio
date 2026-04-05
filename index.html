@@ -459,222 +459,317 @@
 </div>
 
 <script>
-/* -----------------------------
-   NAVIGATION & SCREEN MANAGEMENT
------------------------------ */
+const BILL_TYPES = {
+  electricity: { label: 'Electricity', icon: '⚡', color: 'type-electricity' },
+  water:       { label: 'Water',       icon: '💧', color: 'type-water' },
+  wifi:        { label: 'WiFi',        icon: '📶', color: 'type-wifi' },
+  other:       { label: 'Other',       icon: '📦', color: 'type-other' }
+};
+
+let state = { user: null, household: null, bills: [], currentFilter: 'all', photoData: null };
+
+function ls(key, val) {
+  if (val === undefined) { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } }
+  localStorage.setItem(key, JSON.stringify(val));
+}
+function genCode() { return Math.random().toString(36).substr(2, 6).toUpperCase(); }
+
+function showStep(id) {
+  document.querySelectorAll('.setup-step').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+function saveSupabase() {
+  const url = document.getElementById('sb-url').value.trim();
+  const key = document.getElementById('sb-key').value.trim();
+  if (!url || !key) { alert('Please enter both fields'); return; }
+  ls('sb_url', url); ls('sb_key', key);
+  showStep('step-gemini');
+}
+
+function saveGemini() {
+  const key = document.getElementById('gemini-key').value.trim();
+  if (key) ls('gemini_key', key);
+  showStep('step-config');
+}
+
+function finishSetup() {
+  const name = document.getElementById('setup-name').value.trim() || 'You';
+  const hname = document.getElementById('setup-household').value.trim() || 'My Household';
+  const user = { name, id: 'user_' + Date.now() };
+  const household = { name: hname, code: genCode(), members: [{ ...user, role: 'owner' }], created: Date.now() };
+  ls('billio_user', user); ls('billio_household', household); ls('billio_bills', []);
+  state.user = user; state.household = household; state.bills = [];
+  initApp();
+}
+
+function initApp() {
+  state.user = ls('billio_user');
+  state.household = ls('billio_household');
+  state.bills = ls('billio_bills') || [];
+  if (!state.user || !state.household) {
+    document.getElementById('setupWizard').style.display = 'flex';
+    document.getElementById('mainApp').style.display = 'none';
+    return;
+  }
+  document.getElementById('setupWizard').style.display = 'none';
+  const mainApp = document.getElementById('mainApp');
+  mainApp.style.display = 'flex';
+  if (ls('gemini_key')) document.getElementById('geminiBadge').style.display = 'inline-flex';
+  document.getElementById('householdBadge').textContent = state.household.name;
+  document.getElementById('household-name-display').textContent = state.household.name;
+  document.getElementById('household-code').textContent = state.household.code;
+  const mc = state.household.members?.length || 1;
+  document.getElementById('household-member-count').textContent = mc + ' member' + (mc !== 1 ? 's' : '');
+  renderMembers(); renderDashboard(); renderBills();
+}
+
 function showScreen(name) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
   document.getElementById('screen-' + name).classList.add('active');
   const nb = document.querySelector('[data-screen="' + name + '"]');
   if (nb) nb.classList.add('active');
+  document.getElementById('mainContent').scrollTop = 0;
+  if (name === 'dashboard') renderDashboard();
+  if (name === 'bills') renderBills();
+  if (name === 'add') resetAddForm();
 }
 
-/* -----------------------------
-   BILL MANAGEMENT
------------------------------ */
-function saveBill() {
-  const type = document.getElementById('bill-type').value;
-  const amount = parseFloat(document.getElementById('bill-amount').value) || 0;
-  const consumption = document.getElementById('bill-consumption').value.trim();
-  const period = document.getElementById('bill-period').value.trim();
-  const notes = document.getElementById('bill-notes').value.trim();
-  const text = document.getElementById('bill-text').value.trim();
-  const photo = state.photoData || null;
-
-  if (amount <= 0 || !period) {
-    alert('Please enter a valid amount and period.');
-    return;
-  }
-
-  const bill = {
-    id: 'bill_' + Date.now(),
-    type, amount, consumption, period, notes, text, photo,
-    created: Date.now()
-  };
-
-  state.bills.push(bill);
-  ls('billio_bills', state.bills);
-
-  // Reset form
+function resetAddForm() {
   document.getElementById('photoPreview').style.display = 'none';
-  state.photoData = null;
+  document.getElementById('extracting-status').style.display = 'none';
   document.getElementById('extracted-data').style.display = 'none';
+  document.getElementById('no-key-warning').style.display = 'none';
+  document.getElementById('uploadZone').style.display = 'block';
   document.getElementById('manual-trigger').style.display = 'block';
   document.getElementById('photoInput').value = '';
+  state.photoData = null;
+}
 
-  renderDashboard();
-  renderBills();
+async function handlePhoto(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    const base64 = e.target.result;
+    state.photoData = base64;
+    const preview = document.getElementById('photoPreview');
+    preview.src = base64; preview.style.display = 'block';
+    document.getElementById('uploadZone').style.display = 'none';
+    document.getElementById('manual-trigger').style.display = 'none';
+    document.getElementById('no-key-warning').style.display = 'none';
+    const geminiKey = ls('gemini_key');
+    if (!geminiKey) {
+      document.getElementById('no-key-warning').style.display = 'block';
+      document.getElementById('extract-result-msg').textContent = '📝 No AI key — fill in details manually';
+      document.getElementById('extracted-data').style.display = 'block';
+      return;
+    }
+    document.getElementById('extracting-status').style.display = 'block';
+    await extractWithGemini(base64.split(',')[1], file.type || 'image/jpeg');
+  };
+  reader.readAsDataURL(file);
+}
+
+async function extractWithGemini(b64, mimeType) {
+  const geminiKey = ls('gemini_key');
+  try {
+    const res = await fetch(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + geminiKey,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [
+            { inline_data: { mime_type: mimeType, data: b64 } },
+            { text: 'Extract bill info from this image. Reply ONLY with valid JSON, no markdown: {"type":"electricity|water|wifi|other","amount":0.00,"currency":"EUR","consumption":"","period":"","provider":"","raw_text":""}. amount must be a float. Infer type from context.' }
+          ]}],
+          generationConfig: { temperature: 0.1, maxOutputTokens: 600 }
+        })
+      }
+    );
+    const data = await res.json();
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const match = text.match(/\{[\s\S]*\}/);
+    if (match) {
+      const info = JSON.parse(match[0]);
+      document.getElementById('bill-type').value = info.type || 'other';
+      document.getElementById('bill-amount').value = info.amount || '';
+      document.getElementById('bill-consumption').value = info.consumption || '';
+      document.getElementById('bill-period').value = info.period || '';
+      document.getElementById('bill-notes').value = info.provider || '';
+      document.getElementById('bill-text').value = info.raw_text || '';
+      document.getElementById('extract-result-msg').textContent = '✓ Gemini extracted details — review and confirm';
+    } else {
+      document.getElementById('extract-result-msg').textContent = '⚠ Could not extract — please fill in manually';
+    }
+  } catch (e) {
+    document.getElementById('extract-result-msg').textContent = '⚠ Extraction error — please fill in manually';
+  }
+  document.getElementById('extracting-status').style.display = 'none';
+  document.getElementById('extracted-data').style.display = 'block';
+}
+
+function showManualForm() {
+  document.getElementById('extract-result-msg').textContent = '📝 Fill in bill details manually';
+  document.getElementById('extracted-data').style.display = 'block';
+  document.getElementById('manual-trigger').style.display = 'none';
+  document.getElementById('no-key-warning').style.display = 'none';
+}
+
+function saveBill() {
+  const amount = parseFloat(document.getElementById('bill-amount').value) || 0;
+  if (!amount) { alert('Please enter the bill amount'); return; }
+  const bill = {
+    id: 'bill_' + Date.now(),
+    type: document.getElementById('bill-type').value,
+    amount,
+    consumption: document.getElementById('bill-consumption').value.trim(),
+    period: document.getElementById('bill-period').value.trim(),
+    notes: document.getElementById('bill-notes').value.trim(),
+    text: document.getElementById('bill-text').value.trim(),
+    photo: state.photoData,
+    date: new Date().toISOString(),
+    addedBy: state.user?.name || 'You',
+    household: state.household?.code
+  };
+  state.bills.unshift(bill);
+  ls('billio_bills', state.bills);
+  syncToSupabase(bill);
   showScreen('bills');
 }
 
-/* -----------------------------
-   RENDERING DASHBOARD & LISTS
------------------------------ */
+async function syncToSupabase(bill) {
+  const url = ls('sb_url'), key = ls('sb_key');
+  if (!url || !key) return;
+  try {
+    const payload = { ...bill }; delete payload.photo;
+    await fetch(url + '/rest/v1/bills', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': key, 'Authorization': 'Bearer ' + key, 'Prefer': 'return=minimal' },
+      body: JSON.stringify(payload)
+    });
+  } catch (e) {}
+}
+
 function renderDashboard() {
-  const monthBills = state.bills.filter(b => {
-    const d = new Date(b.created);
-    const now = new Date();
-    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
-  });
-  const monthTotal = monthBills.reduce((sum, b) => sum + b.amount, 0);
-  const totalBills = state.bills.length;
-
+  const now = new Date();
+  const thisMonth = state.bills.filter(b => { const d = new Date(b.date); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); });
+  const monthTotal = thisMonth.reduce((s, b) => s + (b.amount || 0), 0);
   document.getElementById('stat-month').textContent = '€' + monthTotal.toFixed(2);
-  document.getElementById('stat-month-count').textContent = monthBills.length + ' bill' + (monthBills.length !== 1 ? 's' : '');
-  document.getElementById('stat-total').textContent = totalBills;
-
-  // Category chart
-  const chartContainer = document.getElementById('category-chart');
-  chartContainer.innerHTML = '';
-  const categories = ['electricity','water','wifi','other'];
-  categories.forEach(cat => {
-    const catBills = state.bills.filter(b => b.type === cat);
-    const total = catBills.reduce((sum,b) => sum + b.amount,0);
-    const bar = document.createElement('div');
-    bar.className = 'chart-bar';
-    const label = document.createElement('div'); label.className = 'chart-bar-label'; label.textContent = BILL_TYPES[cat].icon + ' ' + BILL_TYPES[cat].label;
-    const track = document.createElement('div'); track.className = 'chart-bar-track';
-    const fill = document.createElement('div'); fill.className = 'chart-bar-fill'; fill.style.width = total ? Math.min(total/500*100,100) + '%' : '0%'; fill.style.background = getComputedStyle(document.documentElement).getPropertyValue('--accent2');
-    track.appendChild(fill);
-    const value = document.createElement('div'); value.className = 'chart-bar-value'; value.textContent = '€' + total.toFixed(2);
-    bar.appendChild(label); bar.appendChild(track); bar.appendChild(value);
-    chartContainer.appendChild(bar);
-  });
+  document.getElementById('stat-month-count').textContent = thisMonth.length + ' bill' + (thisMonth.length !== 1 ? 's' : '');
+  document.getElementById('stat-total').textContent = state.bills.length;
+  const cats = { electricity: 0, water: 0, wifi: 0, other: 0 };
+  const total = state.bills.reduce((s, b) => { cats[b.type] = (cats[b.type] || 0) + b.amount; return s + b.amount; }, 0);
+  const catColors = { electricity: '#fbbf24', water: '#60a5fa', wifi: '#a78bfa', other: '#94a3b8' };
+  document.getElementById('category-chart').innerHTML = total === 0
+    ? '<div style="text-align:center;padding:16px 0;color:var(--text3);font-size:13px">No bills yet</div>'
+    : Object.entries(cats).map(([c, a]) => `<div class="chart-bar"><div class="chart-bar-label">${BILL_TYPES[c].icon} ${BILL_TYPES[c].label}</div><div class="chart-bar-track"><div class="chart-bar-fill" style="width:${(a/total*100).toFixed(1)}%;background:${catColors[c]}"></div></div><div class="chart-bar-value" style="color:${catColors[c]}">€${a.toFixed(0)}</div></div>`).join('');
+  const recent = state.bills.slice(0, 5);
+  document.getElementById('recent-bills-list').innerHTML = recent.length === 0
+    ? '<div class="empty-state" style="padding:20px 0"><div class="empty-icon">🧾</div><div class="empty-text">No bills yet</div><div class="empty-sub">Tap Add to photograph your first bill</div></div>'
+    : recent.map(billItemHTML).join('');
 }
 
-function renderBills(filter = state.currentFilter) {
-  const container = document.getElementById('bills-list');
-  container.innerHTML = '';
-  const bills = filter === 'all' ? state.bills : state.bills.filter(b => b.type === filter);
-  if (!bills.length) {
-    container.innerHTML = '<div class="empty-state"><div class="empty-icon">🧾</div><div class="empty-text">No bills</div><div class="empty-sub">Add a bill to get started</div></div>';
-    return;
-  }
-
-  bills.forEach(b => {
-    const item = document.createElement('div');
-    item.className = 'bill-item ' + BILL_TYPES[b.type].color;
-    item.innerHTML = `
-      <div class="bill-icon">${BILL_TYPES[b.type].icon}</div>
-      <div class="bill-info">
-        <div class="bill-name">${BILL_TYPES[b.type].label} — ${b.period}</div>
-        <div class="bill-meta">€${b.amount.toFixed(2)}${b.consumption ? ' — ' + b.consumption : ''}</div>
-      </div>
-    `;
-    item.onclick = () => openBillModal(b);
-    container.appendChild(item);
-  });
+function billItemHTML(bill) {
+  const t = BILL_TYPES[bill.type] || BILL_TYPES.other;
+  const d = new Date(bill.date);
+  const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
+  return `<div class="bill-item" onclick="openBill('${bill.id}')"><div class="bill-icon ${t.color}">${t.icon}</div><div class="bill-info"><div class="bill-name">${t.label}${bill.notes ? ' · ' + bill.notes : ''}</div><div class="bill-meta">${bill.period || dateStr}${bill.consumption ? ' · ' + bill.consumption : ''}</div></div><div style="text-align:right;flex-shrink:0"><div style="font-size:15px;font-weight:600;color:var(--accent)">€${(bill.amount||0).toFixed(2)}</div><div style="font-size:11px;color:var(--text3);margin-top:2px">${bill.addedBy || ''}</div></div></div>`;
 }
 
-/* -----------------------------
-   FILTER BILLS
------------------------------ */
-function filterBills(el, type) {
-  state.currentFilter = type;
-  document.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
+function renderBills() {
+  const filtered = state.currentFilter === 'all' ? state.bills : state.bills.filter(b => b.type === state.currentFilter);
+  document.getElementById('bills-list').innerHTML = filtered.length === 0
+    ? '<div class="empty-state"><div class="empty-icon">🧾</div><div class="empty-text">No bills here yet</div><div class="empty-sub">Add a bill using the + tab</div></div>'
+    : filtered.map(billItemHTML).join('');
+}
+
+function filterBills(el, filter) {
+  document.querySelectorAll('.pill[data-filter]').forEach(p => p.classList.remove('active'));
   el.classList.add('active');
-  renderBills(type);
+  state.currentFilter = filter;
+  renderBills();
 }
 
-/* -----------------------------
-   MANUAL ENTRY
------------------------------ */
-function showManualForm() {
-  document.getElementById('no-key-warning').style.display = 'none';
-  document.getElementById('extracted-data').style.display = 'block';
-  document.getElementById('manual-trigger').style.display = 'none';
-  document.getElementById('bill-type').value = 'electricity';
-  document.getElementById('bill-amount').value = '';
-  document.getElementById('bill-consumption').value = '';
-  document.getElementById('bill-period').value = '';
-  document.getElementById('bill-notes').value = '';
-  document.getElementById('bill-text').value = '';
+function openBill(id) {
+  const bill = state.bills.find(b => b.id === id);
+  if (!bill) return;
+  const t = BILL_TYPES[bill.type] || BILL_TYPES.other;
+  document.getElementById('modal-title').textContent = t.icon + ' ' + t.label + ' Bill';
+  let html = '';
+  if (bill.photo) html += `<img src="${bill.photo}" class="bill-detail-photo" alt="Bill photo">`;
+  html += `<div class="detail-field"><span class="detail-key">Amount</span><span class="detail-val" style="color:var(--accent);font-size:18px">€${(bill.amount||0).toFixed(2)}</span></div>`;
+  if (bill.period) html += `<div class="detail-field"><span class="detail-key">Period</span><span class="detail-val">${bill.period}</span></div>`;
+  if (bill.consumption) html += `<div class="detail-field"><span class="detail-key">Consumption</span><span class="detail-val">${bill.consumption}</span></div>`;
+  if (bill.notes) html += `<div class="detail-field"><span class="detail-key">Provider</span><span class="detail-val">${bill.notes}</span></div>`;
+  html += `<div class="detail-field"><span class="detail-key">Added by</span><span class="detail-val">${bill.addedBy || 'You'}</span></div>`;
+  html += `<div class="detail-field"><span class="detail-key">Date added</span><span class="detail-val">${new Date(bill.date).toLocaleDateString('en-GB')}</span></div>`;
+  if (bill.text) html += `<div style="margin-top:16px"><div class="form-label" style="margin-bottom:8px">Extracted Text</div><div style="background:var(--bg3);border-radius:12px;padding:14px;font-size:12px;color:var(--text2);line-height:1.7;white-space:pre-wrap">${bill.text}</div></div>`;
+  html += `<button class="btn btn-danger btn-full" style="margin-top:18px" onclick="deleteBill('${id}')">Delete Bill</button>`;
+  document.getElementById('modal-content').innerHTML = html;
+  document.getElementById('billModal').classList.remove('hidden');
 }
 
-/* -----------------------------
-   BILL DETAIL MODAL
------------------------------ */
-function openBillModal(bill) {
-  const modal = document.getElementById('billModal');
-  const content = document.getElementById('modal-content');
-  content.innerHTML = `
-    ${bill.photo ? `<img src="${bill.photo}" class="bill-detail-photo">` : ''}
-    <div class="detail-field"><div class="detail-key">Type</div><div class="detail-val">${BILL_TYPES[bill.type].label}</div></div>
-    <div class="detail-field"><div class="detail-key">Amount</div><div class="detail-val">€${bill.amount.toFixed(2)}</div></div>
-    <div class="detail-field"><div class="detail-key">Consumption</div><div class="detail-val">${bill.consumption || '-'}</div></div>
-    <div class="detail-field"><div class="detail-key">Period</div><div class="detail-val">${bill.period}</div></div>
-    <div class="detail-field"><div class="detail-key">Notes</div><div class="detail-val">${bill.notes || '-'}</div></div>
-    <div class="detail-field"><div class="detail-key">Extracted text</div><div class="detail-val">${bill.text || '-'}</div></div>
-  `;
-  modal.classList.remove('hidden');
+function closeModal() { document.getElementById('billModal').classList.add('hidden'); }
+
+function deleteBill(id) {
+  if (!confirm('Delete this bill?')) return;
+  state.bills = state.bills.filter(b => b.id !== id);
+  ls('billio_bills', state.bills);
+  closeModal(); renderBills(); renderDashboard();
 }
 
-function closeModal() {
-  document.getElementById('billModal').classList.add('hidden');
-}
-
-/* -----------------------------
-   HOUSEHOLD MANAGEMENT
------------------------------ */
 function renderMembers() {
-  const container = document.getElementById('members-list');
-  container.innerHTML = '';
-  state.household.members.forEach(m => {
-    const item = document.createElement('div'); item.className = 'member-item';
-    item.innerHTML = `<div class="member-avatar">${m.name[0].toUpperCase()}</div><div>${m.name} ${m.role === 'owner' ? '(Owner)' : ''}</div>`;
-    container.appendChild(item);
-  });
+  const members = state.household?.members || [{ name: state.user?.name || 'You', role: 'owner' }];
+  document.getElementById('members-list').innerHTML = members.map(m => {
+    const ini = m.name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+    return `<div class="member-item"><div class="member-avatar">${ini}</div><div><div style="font-size:14px;font-weight:500">${m.name}</div><div style="font-size:12px;color:var(--text2)">${m.role || 'member'}</div></div></div>`;
+  }).join('');
 }
 
 function copyCode() {
-  navigator.clipboard.writeText(state.household.code).then(() => alert('Invite code copied!'));
+  const code = state.household?.code || '';
+  navigator.clipboard?.writeText(code).then(() => alert('Copied: ' + code)).catch(() => alert('Your code: ' + code));
 }
 
 function joinHousehold() {
   const code = document.getElementById('join-code').value.trim().toUpperCase();
-  if (!code || code !== state.household.code) { alert('Invalid code'); return; }
-  const newMember = { name: state.user.name, id: state.user.id, role: 'member' };
-  if (!state.household.members.find(m => m.id === state.user.id)) {
-    state.household.members.push(newMember);
-    ls('billio_household', state.household);
-    renderMembers();
-    alert('Joined household!');
-  }
+  if (code.length < 4) { alert('Enter a valid invite code'); return; }
+  alert('With Supabase connected, this would join household: ' + code + '\n\nSet up Supabase to enable cross-device household sharing!');
 }
 
-/* -----------------------------
-   SETTINGS
------------------------------ */
-function showSettingsModal() { document.getElementById('settingsModal').classList.remove('hidden'); }
+function showSettingsModal() {
+  document.getElementById('cfg-sb-url').value = ls('sb_url') || '';
+  document.getElementById('cfg-sb-key').value = ls('sb_key') || '';
+  document.getElementById('cfg-gemini-key').value = ls('gemini_key') || '';
+  document.getElementById('settingsModal').classList.remove('hidden');
+}
+
 function closeSettings() { document.getElementById('settingsModal').classList.add('hidden'); }
 
 function saveSettings() {
-  const sbUrl = document.getElementById('cfg-sb-url').value.trim();
-  const sbKey = document.getElementById('cfg-sb-key').value.trim();
-  const gemKey = document.getElementById('cfg-gemini-key').value.trim();
-  if (sbUrl) ls('sb_url', sbUrl);
-  if (sbKey) ls('sb_key', sbKey);
-  if (gemKey) { ls('gemini_key', gemKey); document.getElementById('geminiBadge').style.display = 'inline-flex'; }
-  alert('Settings saved!');
+  const u = document.getElementById('cfg-sb-url').value.trim();
+  const k = document.getElementById('cfg-sb-key').value.trim();
+  const g = document.getElementById('cfg-gemini-key').value.trim();
+  if (u) ls('sb_url', u);
+  if (k) ls('sb_key', k);
+  if (g) { ls('gemini_key', g); document.getElementById('geminiBadge').style.display = 'inline-flex'; }
   closeSettings();
+  alert('Settings saved!');
 }
 
-/* -----------------------------
-   RESET APP
------------------------------ */
 function resetApp() {
-  if (confirm('This will reset all your data. Continue?')) {
-    localStorage.clear();
-    location.reload();
-  }
+  if (!confirm('Reset everything? All local data will be deleted.')) return;
+  ['billio_user','billio_household','billio_bills','sb_url','sb_key','gemini_key'].forEach(k => localStorage.removeItem(k));
+  location.reload();
 }
 
-/* -----------------------------
-   INITIALIZE APP
------------------------------ */
+document.getElementById('billModal').addEventListener('click', e => { if (e.target.id === 'billModal') closeModal(); });
+document.getElementById('settingsModal').addEventListener('click', e => { if (e.target.id === 'settingsModal') closeSettings(); });
+
 initApp();
 </script>
-
 </body>
 </html>
