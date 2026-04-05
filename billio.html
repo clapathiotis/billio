@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Billio">
+<meta name="theme-color" content="#0f0f11">
+<title>Billio — Household Bills</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  :root {
+    --bg: #0f0f11; --bg2: #17171a; --bg3: #1e1e23; --bg4: #26262d;
+    --border: rgba(255,255,255,0.08); --border2: rgba(255,255,255,0.14);
+    --text: #f0eff5; --text2: #9896a8; --text3: #5e5c6e;
+    --accent: #a78bfa; --accent2: #7c5cf6;
+    --green: #34d399; --amber: #fbbf24; --red: #f87171; --blue: #60a5fa; --teal: #2dd4bf;
+    --font: 'DM Sans', sans-serif; --mono: 'DM Mono', monospace;
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  html, body { height: 100%; overflow: hidden; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); }
+  .app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
+
+  /* HEADER */
+  .header { padding: calc(16px + var(--safe-top)) 20px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; background: var(--bg2); flex-shrink: 0; }
+  .logo { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .logo-icon { width: 28px; height: 28px; background: linear-gradient(135deg, var(--accent2), var(--teal)); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+  .household-badge { font-size: 12px; background: var(--bg3); border: 1px solid var(--border2); padding: 4px 10px; border-radius: 20px; color: var(--text2); cursor: pointer; }
+
+  /* BOTTOM NAV */
+  .nav { display: flex; background: var(--bg2); border-top: 1px solid var(--border); flex-shrink: 0; padding-bottom: var(--safe-bottom); }
+  .nav-btn { flex: 1; padding: 10px 4px 8px; border: none; background: transparent; color: var(--text3); font-family: var(--font); font-size: 10px; cursor: pointer; transition: all 0.15s; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .nav-btn .nav-icon { font-size: 20px; }
+  .nav-btn.active { color: var(--accent); }
+  .nav-btn.active .nav-icon { filter: drop-shadow(0 0 6px var(--accent)); }
+
+  /* SCROLLABLE CONTENT */
+  .content { flex: 1; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; }
+  .content-inner { padding: 16px; max-width: 600px; margin: 0 auto; }
+
+  .screen { display: none; }
+  .screen.active { display: block; }
+
+  /* CARDS */
+  .card { background: var(--bg2); border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin-bottom: 12px; }
+  .card-title { font-size: 11px; color: var(--text2); margin-bottom: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.08em; }
+
+  /* STATS */
+  .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 12px; }
+  .stat-card { background: var(--bg3); border-radius: 12px; padding: 14px; }
+  .stat-label { font-size: 10px; color: var(--text3); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.06em; }
+  .stat-value { font-size: 22px; font-weight: 600; }
+  .stat-sub { font-size: 11px; color: var(--text2); margin-top: 4px; }
+
+  /* BILL ITEMS */
+  .bill-item { display: flex; align-items: center; gap: 12px; padding: 10px 8px; border-bottom: 1px solid var(--border); cursor: pointer; border-radius: 10px; transition: background 0.1s; }
+  .bill-item:active { background: var(--bg3); }
+  .bill-item:last-child { border-bottom: none; }
+  .bill-icon { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px; flex-shrink: 0; }
+  .bill-info { flex: 1; min-width: 0; }
+  .bill-name { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bill-meta { font-size: 12px; color: var(--text2); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .type-electricity { background: rgba(251,191,36,0.15); color: var(--amber); }
+  .type-water { background: rgba(96,165,250,0.15); color: var(--blue); }
+  .type-wifi { background: rgba(167,139,250,0.15); color: var(--accent); }
+  .type-other { background: rgba(148,163,184,0.15); color: #94a3b8; }
+
+  /* UPLOAD */
+  .upload-zone { border: 2px dashed var(--border2); border-radius: 14px; padding: 36px 20px; text-align: center; cursor: pointer; transition: all 0.2s; }
+  .upload-zone:active { border-color: var(--accent); background: rgba(124,92,246,0.05); }
+  .upload-icon { font-size: 40px; margin-bottom: 12px; }
+  .upload-text { font-size: 15px; font-weight: 500; margin-bottom: 6px; }
+  .upload-sub { font-size: 13px; color: var(--text2); }
+  input[type=file] { display: none; }
+
+  /* BUTTONS */
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 18px; border-radius: 12px; border: none; font-family: var(--font); font-size: 15px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary { background: var(--accent2); color: white; }
+  .btn-ghost { background: var(--bg3); color: var(--text); border: 1px solid var(--border2); }
+  .btn-danger { background: rgba(248,113,113,0.15); color: var(--red); border: 1px solid rgba(248,113,113,0.2); }
+  .btn-full { width: 100%; }
+
+  /* FORMS */
+  .form-group { margin-bottom: 14px; }
+  .form-label { font-size: 12px; color: var(--text2); margin-bottom: 6px; display: block; font-weight: 500; }
+  .form-input { width: 100%; background: var(--bg3); border: 1px solid var(--border2); border-radius: 12px; padding: 12px 14px; color: var(--text); font-family: var(--font); font-size: 15px; outline: none; -webkit-appearance: none; appearance: none; }
+  .form-input:focus { border-color: var(--accent2); }
+  select.form-input { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%239896a8' stroke-width='1.5' fill='none'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; padding-right: 36px; }
+  select.form-input option { background: #17171a; }
+  textarea.form-input { resize: none; }
+  .photo-preview { width: 100%; max-height: 220px; object-fit: contain; border-radius: 12px; margin: 12px 0; background: var(--bg3); display: block; }
+
+  /* SPINNER */
+  .spinner { width: 18px; height: 18px; border: 2px solid rgba(255,255,255,0.2); border-top-color: white; border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block; flex-shrink: 0; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* MODALS */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 100; display: flex; align-items: flex-end; justify-content: center; }
+  .modal-overlay.hidden { display: none; }
+  .modal { background: var(--bg2); border-radius: 24px 24px 0 0; padding: 16px 20px calc(20px + var(--safe-bottom)); width: 100%; max-width: 600px; max-height: 88vh; overflow-y: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--border); border-bottom: none; }
+  .modal-handle { width: 36px; height: 4px; background: var(--border2); border-radius: 2px; margin: 0 auto 16px; }
+  .modal-title { font-size: 17px; font-weight: 600; margin-bottom: 16px; }
+
+  /* SETUP */
+  .setup-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; text-align: center; padding: 32px 24px calc(32px + var(--safe-bottom)); overflow-y: auto; }
+  .setup-logo { width: 72px; height: 72px; background: linear-gradient(135deg, var(--accent2), var(--teal)); border-radius: 20px; display: flex; align-items: center; justify-content: center; font-size: 32px; margin: 0 auto 20px; }
+  .setup-title { font-size: 26px; font-weight: 600; margin-bottom: 8px; }
+  .setup-sub { font-size: 15px; color: var(--text2); margin-bottom: 36px; line-height: 1.6; }
+  .setup-options { display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 380px; }
+  .setup-option { background: var(--bg2); border: 1px solid var(--border2); border-radius: 16px; padding: 18px; cursor: pointer; text-align: left; display: flex; align-items: center; gap: 14px; }
+  .setup-option:active { border-color: var(--accent); }
+  .setup-option-icon { font-size: 26px; }
+  .setup-option-text strong { display: block; font-size: 15px; font-weight: 500; }
+  .setup-option-text span { font-size: 13px; color: var(--text2); }
+  .setup-step { display: none; }
+  .setup-step.active { display: flex; flex-direction: column; align-items: center; width: 100%; }
+  .progress-dots { display: flex; gap: 6px; justify-content: center; margin-bottom: 24px; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--bg4); }
+  .dot.active { background: var(--accent); }
+
+  /* FILTERS */
+  .filter-row { display: flex; gap: 8px; margin-bottom: 14px; overflow-x: auto; padding-bottom: 4px; -webkit-overflow-scrolling: touch; }
+  .filter-row::-webkit-scrollbar { display: none; }
+  .pill { flex-shrink: 0; padding: 7px 16px; border-radius: 20px; border: 1px solid var(--border2); font-size: 13px; cursor: pointer; background: var(--bg3); color: var(--text2); }
+  .pill.active { background: var(--accent2); border-color: var(--accent2); color: white; }
+
+  /* MISC */
+  .empty-state { text-align: center; padding: 48px 20px; }
+  .empty-icon { font-size: 44px; margin-bottom: 12px; }
+  .empty-text { font-size: 15px; font-weight: 500; margin-bottom: 6px; }
+  .empty-sub { font-size: 13px; color: var(--text2); }
+  .alert { padding: 12px 14px; border-radius: 12px; font-size: 13px; margin-bottom: 14px; line-height: 1.5; }
+  .alert-info { background: rgba(96,165,250,0.1); border: 1px solid rgba(96,165,250,0.2); color: var(--blue); }
+  .alert-success { background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.2); color: var(--green); }
+  .alert-warn { background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.2); color: var(--amber); }
+  .chart-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .chart-bar-label { font-size: 12px; color: var(--text2); width: 82px; flex-shrink: 0; }
+  .chart-bar-track { flex: 1; height: 8px; background: var(--bg3); border-radius: 4px; overflow: hidden; }
+  .chart-bar-fill { height: 100%; border-radius: 4px; transition: width 0.6s ease; }
+  .chart-bar-value { font-size: 12px; font-family: var(--mono); width: 58px; text-align: right; flex-shrink: 0; }
+  .detail-field { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+  .detail-field:last-child { border-bottom: none; }
+  .detail-key { color: var(--text2); flex-shrink: 0; }
+  .detail-val { font-weight: 500; text-align: right; }
+  .bill-detail-photo { width: 100%; border-radius: 14px; margin-bottom: 16px; max-height: 320px; object-fit: contain; background: var(--bg3); display: block; }
+  .member-item { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .member-item:last-child { border-bottom: none; }
+  .member-avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--accent2); display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; flex-shrink: 0; }
+  .gemini-badge { display: inline-flex; align-items: center; gap: 5px; background: rgba(66,133,244,0.12); border: 1px solid rgba(66,133,244,0.25); color: #60a5fa; border-radius: 8px; padding: 4px 10px; font-size: 11px; font-weight: 500; }
+  .copy-btn { background: var(--bg4); border: 1px solid var(--border2); border-radius: 8px; padding: 8px 14px; color: var(--text2); font-size: 13px; cursor: pointer; font-family: var(--font); }
+  ::-webkit-scrollbar { width: 0; }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+
+  <!-- SETUP WIZARD -->
+  <div id="setupWizard" class="setup-screen">
+    <div class="setup-logo">🏠</div>
+
+    <div class="setup-step active" id="step-welcome">
+      <div class="setup-title">Billio</div>
+      <div class="setup-sub">Track household bills together.<br>Free, private, always accessible.</div>
+      <div class="setup-options">
+        <div class="setup-option" onclick="showStep('step-config')">
+          <div class="setup-option-icon">⚡</div>
+          <div class="setup-option-text"><strong>Quick Start</strong><span>Demo mode — no setup needed</span></div>
+        </div>
+        <div class="setup-option" onclick="showStep('step-supabase')">
+          <div class="setup-option-icon">☁️</div>
+          <div class="setup-option-text"><strong>Full Setup</strong><span>Free cloud sync + AI bill scanning</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="setup-step" id="step-supabase">
+      <div class="progress-dots"><div class="dot active"></div><div class="dot"></div><div class="dot"></div></div>
+      <div class="setup-title" style="margin-bottom:8px">Connect Supabase</div>
+      <div class="setup-sub" style="margin-bottom:20px">Free at supabase.com — create a project, copy your URL and anon key</div>
+      <div style="width:100%;max-width:380px">
+        <div class="form-group">
+          <label class="form-label">Supabase Project URL</label>
+          <input class="form-input" id="sb-url" placeholder="https://xxxx.supabase.co" type="url" inputmode="url">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Supabase Anon Key</label>
+          <input class="form-input" id="sb-key" placeholder="eyJhbGci..." type="password">
+        </div>
+        <div class="alert alert-info" style="margin-bottom:16px">Your keys stay in your browser — never sent anywhere except Supabase.</div>
+        <button class="btn btn-primary btn-full" onclick="saveSupabase()">Continue →</button>
+        <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="showStep('step-welcome')">← Back</button>
+      </div>
+    </div>
+
+    <div class="setup-step" id="step-gemini">
+      <div class="progress-dots"><div class="dot"></div><div class="dot active"></div><div class="dot"></div></div>
+      <div class="setup-title" style="margin-bottom:8px">Gemini AI Key</div>
+      <div class="setup-sub" style="margin-bottom:4px">For free bill photo scanning</div>
+      <div class="gemini-badge" style="margin-bottom:20px">✦ 1,500 free scans per day</div>
+      <div style="width:100%;max-width:380px">
+        <div class="alert alert-info" style="margin-bottom:16px">
+          1. Go to <strong>aistudio.google.com</strong><br>
+          2. Sign in with Google<br>
+          3. Get API Key → Create API Key → Copy it
+        </div>
+        <div class="form-group">
+          <label class="form-label">Gemini API Key</label>
+          <input class="form-input" id="gemini-key" placeholder="AIzaSy...">
+        </div>
+        <button class="btn btn-primary btn-full" onclick="saveGemini()">Continue →</button>
+        <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="showStep('step-supabase')">← Back</button>
+      </div>
+    </div>
+
+    <div class="setup-step" id="step-config">
+      <div class="progress-dots"><div class="dot"></div><div class="dot"></div><div class="dot active"></div></div>
+      <div class="setup-title" style="margin-bottom:8px">Your profile</div>
+      <div class="setup-sub" style="margin-bottom:20px">Set your name and household</div>
+      <div style="width:100%;max-width:380px">
+        <div class="form-group">
+          <label class="form-label">Your name</label>
+          <input class="form-input" id="setup-name" placeholder="e.g. Alex" autocomplete="given-name">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Household name</label>
+          <input class="form-input" id="setup-household" placeholder="e.g. Apartment 4B">
+        </div>
+        <button class="btn btn-primary btn-full" onclick="finishSetup()">Create Household →</button>
+        <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="showStep('step-welcome')">← Back</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN APP -->
+  <div id="mainApp" style="display:none; display:flex; flex-direction:column; height:100%; height:100dvh;">
+
+    <div class="header">
+      <div class="logo">
+        <div class="logo-icon">🏠</div>
+        Billio
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="gemini-badge" id="geminiBadge" style="display:none">✦ AI</div>
+        <div class="household-badge" onclick="showScreen('household')" id="householdBadge">Household</div>
+      </div>
+    </div>
+
+    <div class="content" id="mainContent">
+      <div class="content-inner">
+
+        <!-- DASHBOARD -->
+        <div class="screen active" id="screen-dashboard">
+          <div class="stats-grid">
+            <div class="stat-card">
+              <div class="stat-label">This Month</div>
+              <div class="stat-value" id="stat-month" style="color:var(--accent)">€0</div>
+              <div class="stat-sub" id="stat-month-count">0 bills</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Total Bills</div>
+              <div class="stat-value" id="stat-total">0</div>
+              <div class="stat-sub">all time</div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">By Category</div>
+            <div id="category-chart"></div>
+          </div>
+          <div class="card">
+            <div class="card-title">Recent Bills</div>
+            <div id="recent-bills-list"></div>
+          </div>
+        </div>
+
+        <!-- BILLS LIST -->
+        <div class="screen" id="screen-bills">
+          <div class="filter-row">
+            <div class="pill active" data-filter="all" onclick="filterBills(this,'all')">All</div>
+            <div class="pill" data-filter="electricity" onclick="filterBills(this,'electricity')">⚡ Electricity</div>
+            <div class="pill" data-filter="water" onclick="filterBills(this,'water')">💧 Water</div>
+            <div class="pill" data-filter="wifi" onclick="filterBills(this,'wifi')">📶 WiFi</div>
+            <div class="pill" data-filter="other" onclick="filterBills(this,'other')">📦 Other</div>
+          </div>
+          <div id="bills-list"></div>
+        </div>
+
+        <!-- ADD BILL -->
+        <div class="screen" id="screen-add">
+          <div class="card" style="margin-bottom:14px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+              <div class="card-title" style="margin-bottom:0">Upload Bill Photo</div>
+              <div class="gemini-badge">✦ Gemini AI</div>
+            </div>
+            <div class="upload-zone" id="uploadZone" onclick="document.getElementById('photoInput').click()">
+              <div class="upload-icon">📸</div>
+              <div class="upload-text">Tap to photograph your bill</div>
+              <div class="upload-sub">AI reads the amount, type & consumption automatically</div>
+            </div>
+            <input type="file" id="photoInput" accept="image/*" capture="environment" onchange="handlePhoto(this)">
+            <img id="photoPreview" class="photo-preview" style="display:none" alt="Bill preview">
+          </div>
+
+          <div id="extracting-status" style="display:none" class="alert alert-info">
+            <div style="display:flex;align-items:center;gap:10px"><div class="spinner"></div> Gemini is reading your bill...</div>
+          </div>
+          <div id="no-key-warning" style="display:none" class="alert alert-warn">
+            No Gemini key set — fill in details manually, or add your key in Settings.
+          </div>
+
+          <div id="extracted-data" style="display:none">
+            <div class="alert alert-success" id="extract-result-msg">✓ Details extracted — review and confirm</div>
+            <div class="card">
+              <div class="card-title">Bill Details</div>
+              <div class="form-group">
+                <label class="form-label">Bill Type</label>
+                <select class="form-input" id="bill-type">
+                  <option value="electricity">⚡ Electricity</option>
+                  <option value="water">💧 Water</option>
+                  <option value="wifi">📶 WiFi / Internet</option>
+                  <option value="other">📦 Other</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Amount (€)</label>
+                <input class="form-input" id="bill-amount" type="number" step="0.01" placeholder="0.00" inputmode="decimal">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Consumption (optional)</label>
+                <input class="form-input" id="bill-consumption" placeholder="e.g. 320 kWh, 12 m³">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Period</label>
+                <input class="form-input" id="bill-period" placeholder="e.g. January 2025">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Provider / Notes</label>
+                <input class="form-input" id="bill-notes" placeholder="e.g. EAC, CYTA...">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Extracted text</label>
+                <textarea class="form-input" id="bill-text" rows="3" placeholder="Text extracted from bill..."></textarea>
+              </div>
+              <button class="btn btn-primary btn-full" onclick="saveBill()">💾 Save Bill</button>
+            </div>
+          </div>
+
+          <div id="manual-trigger" style="margin-top:8px">
+            <button class="btn btn-ghost btn-full" onclick="showManualForm()">+ Enter bill details manually</button>
+          </div>
+        </div>
+
+        <!-- HOUSEHOLD -->
+        <div class="screen" id="screen-household">
+          <div class="card">
+            <div class="card-title">Your Household</div>
+            <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px">
+              <div style="width:52px;height:52px;border-radius:16px;background:linear-gradient(135deg,var(--accent2),var(--teal));display:flex;align-items:center;justify-content:center;font-size:24px;flex-shrink:0">🏠</div>
+              <div>
+                <div style="font-size:17px;font-weight:600" id="household-name-display">My Household</div>
+                <div style="font-size:12px;color:var(--text2);margin-top:2px" id="household-member-count">1 member</div>
+              </div>
+            </div>
+            <div style="background:var(--bg3);border-radius:12px;padding:14px;margin-bottom:14px">
+              <div style="font-size:12px;color:var(--text2);margin-bottom:10px">Invite Code — share with housemates</div>
+              <div style="display:flex;gap:10px;align-items:center">
+                <div style="flex:1;font-family:var(--mono);font-size:22px;font-weight:600;letter-spacing:0.15em;color:var(--accent)" id="household-code">------</div>
+                <button class="copy-btn" onclick="copyCode()">Copy</button>
+              </div>
+            </div>
+            <div id="members-list"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Join Another Household</div>
+            <div class="form-group">
+              <label class="form-label">Enter Invite Code</label>
+              <input class="form-input" id="join-code" placeholder="Enter 6-character code" maxlength="6" style="font-family:var(--mono);letter-spacing:0.1em;text-transform:uppercase" autocorrect="off" autocapitalize="characters">
+            </div>
+            <button class="btn btn-ghost btn-full" onclick="joinHousehold()">Join Household</button>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Settings</div>
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <button class="btn btn-ghost btn-full" onclick="showSettingsModal()">⚙️ Update API Keys</button>
+              <button class="btn btn-danger btn-full" onclick="resetApp()">Reset App</button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- BOTTOM NAV -->
+    <div class="nav">
+      <button class="nav-btn active" onclick="showScreen('dashboard')" data-screen="dashboard">
+        <span class="nav-icon">📊</span>Dashboard
+      </button>
+      <button class="nav-btn" onclick="showScreen('bills')" data-screen="bills">
+        <span class="nav-icon">🧾</span>Bills
+      </button>
+      <button class="nav-btn" onclick="showScreen('add')" data-screen="add">
+        <span class="nav-icon">➕</span>Add
+      </button>
+      <button class="nav-btn" onclick="showScreen('household')" data-screen="household">
+        <span class="nav-icon">👥</span>Household
+      </button>
+    </div>
+  </div>
+
+  <!-- BILL DETAIL MODAL -->
+  <div class="modal-overlay hidden" id="billModal">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <div class="modal-title" id="modal-title">Bill Details</div>
+        <button class="btn btn-ghost" style="padding:8px 12px;font-size:16px" onclick="closeModal()">✕</button>
+      </div>
+      <div id="modal-content"></div>
+    </div>
+  </div>
+
+  <!-- SETTINGS MODAL -->
+  <div class="modal-overlay hidden" id="settingsModal">
+    <div class="modal">
+      <div class="modal-handle"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <div class="modal-title">Settings</div>
+        <button class="btn btn-ghost" style="padding:8px 12px;font-size:16px" onclick="closeSettings()">✕</button>
+      </div>
+      <div style="background:var(--bg3);border-radius:12px;padding:14px;margin-bottom:12px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:12px">☁️ Supabase (cloud storage)</div>
+        <div class="form-group">
+          <label class="form-label">Project URL</label>
+          <input class="form-input" id="cfg-sb-url" placeholder="https://xxxx.supabase.co" type="url">
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label">Anon Key</label>
+          <input class="form-input" id="cfg-sb-key" placeholder="eyJhbGci..." type="password">
+        </div>
+      </div>
+      <div style="background:var(--bg3);border-radius:12px;padding:14px;margin-bottom:16px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:8px">✦ Gemini AI <div class="gemini-badge">free</div></div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:12px">Get free key at aistudio.google.com</div>
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label">Gemini API Key</label>
+          <input class="form-input" id="cfg-gemini-key" placeholder="AIzaSy...">
+        </div>
+      </div>
+      <button class="btn btn-primary btn-full" onclick="saveSettings()">Save Settings</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* -----------------------------
+   NAVIGATION & SCREEN MANAGEMENT
+----------------------------- */
+function showScreen(name) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('screen-' + name).classList.add('active');
+  const nb = document.querySelector('[data-screen="' + name + '"]');
+  if (nb) nb.classList.add('active');
+}
+
+/* -----------------------------
+   BILL MANAGEMENT
+----------------------------- */
+function saveBill() {
+  const type = document.getElementById('bill-type').value;
+  const amount = parseFloat(document.getElementById('bill-amount').value) || 0;
+  const consumption = document.getElementById('bill-consumption').value.trim();
+  const period = document.getElementById('bill-period').value.trim();
+  const notes = document.getElementById('bill-notes').value.trim();
+  const text = document.getElementById('bill-text').value.trim();
+  const photo = state.photoData || null;
+
+  if (amount <= 0 || !period) {
+    alert('Please enter a valid amount and period.');
+    return;
+  }
+
+  const bill = {
+    id: 'bill_' + Date.now(),
+    type, amount, consumption, period, notes, text, photo,
+    created: Date.now()
+  };
+
+  state.bills.push(bill);
+  ls('billio_bills', state.bills);
+
+  // Reset form
+  document.getElementById('photoPreview').style.display = 'none';
+  state.photoData = null;
+  document.getElementById('extracted-data').style.display = 'none';
+  document.getElementById('manual-trigger').style.display = 'block';
+  document.getElementById('photoInput').value = '';
+
+  renderDashboard();
+  renderBills();
+  showScreen('bills');
+}
+
+/* -----------------------------
+   RENDERING DASHBOARD & LISTS
+----------------------------- */
+function renderDashboard() {
+  const monthBills = state.bills.filter(b => {
+    const d = new Date(b.created);
+    const now = new Date();
+    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+  });
+  const monthTotal = monthBills.reduce((sum, b) => sum + b.amount, 0);
+  const totalBills = state.bills.length;
+
+  document.getElementById('stat-month').textContent = '€' + monthTotal.toFixed(2);
+  document.getElementById('stat-month-count').textContent = monthBills.length + ' bill' + (monthBills.length !== 1 ? 's' : '');
+  document.getElementById('stat-total').textContent = totalBills;
+
+  // Category chart
+  const chartContainer = document.getElementById('category-chart');
+  chartContainer.innerHTML = '';
+  const categories = ['electricity','water','wifi','other'];
+  categories.forEach(cat => {
+    const catBills = state.bills.filter(b => b.type === cat);
+    const total = catBills.reduce((sum,b) => sum + b.amount,0);
+    const bar = document.createElement('div');
+    bar.className = 'chart-bar';
+    const label = document.createElement('div'); label.className = 'chart-bar-label'; label.textContent = BILL_TYPES[cat].icon + ' ' + BILL_TYPES[cat].label;
+    const track = document.createElement('div'); track.className = 'chart-bar-track';
+    const fill = document.createElement('div'); fill.className = 'chart-bar-fill'; fill.style.width = total ? Math.min(total/500*100,100) + '%' : '0%'; fill.style.background = getComputedStyle(document.documentElement).getPropertyValue('--accent2');
+    track.appendChild(fill);
+    const value = document.createElement('div'); value.className = 'chart-bar-value'; value.textContent = '€' + total.toFixed(2);
+    bar.appendChild(label); bar.appendChild(track); bar.appendChild(value);
+    chartContainer.appendChild(bar);
+  });
+}
+
+function renderBills(filter = state.currentFilter) {
+  const container = document.getElementById('bills-list');
+  container.innerHTML = '';
+  const bills = filter === 'all' ? state.bills : state.bills.filter(b => b.type === filter);
+  if (!bills.length) {
+    container.innerHTML = '<div class="empty-state"><div class="empty-icon">🧾</div><div class="empty-text">No bills</div><div class="empty-sub">Add a bill to get started</div></div>';
+    return;
+  }
+
+  bills.forEach(b => {
+    const item = document.createElement('div');
+    item.className = 'bill-item ' + BILL_TYPES[b.type].color;
+    item.innerHTML = `
+      <div class="bill-icon">${BILL_TYPES[b.type].icon}</div>
+      <div class="bill-info">
+        <div class="bill-name">${BILL_TYPES[b.type].label} — ${b.period}</div>
+        <div class="bill-meta">€${b.amount.toFixed(2)}${b.consumption ? ' — ' + b.consumption : ''}</div>
+      </div>
+    `;
+    item.onclick = () => openBillModal(b);
+    container.appendChild(item);
+  });
+}
+
+/* -----------------------------
+   FILTER BILLS
+----------------------------- */
+function filterBills(el, type) {
+  state.currentFilter = type;
+  document.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  renderBills(type);
+}
+
+/* -----------------------------
+   MANUAL ENTRY
+----------------------------- */
+function showManualForm() {
+  document.getElementById('no-key-warning').style.display = 'none';
+  document.getElementById('extracted-data').style.display = 'block';
+  document.getElementById('manual-trigger').style.display = 'none';
+  document.getElementById('bill-type').value = 'electricity';
+  document.getElementById('bill-amount').value = '';
+  document.getElementById('bill-consumption').value = '';
+  document.getElementById('bill-period').value = '';
+  document.getElementById('bill-notes').value = '';
+  document.getElementById('bill-text').value = '';
+}
+
+/* -----------------------------
+   BILL DETAIL MODAL
+----------------------------- */
+function openBillModal(bill) {
+  const modal = document.getElementById('billModal');
+  const content = document.getElementById('modal-content');
+  content.innerHTML = `
+    ${bill.photo ? `<img src="${bill.photo}" class="bill-detail-photo">` : ''}
+    <div class="detail-field"><div class="detail-key">Type</div><div class="detail-val">${BILL_TYPES[bill.type].label}</div></div>
+    <div class="detail-field"><div class="detail-key">Amount</div><div class="detail-val">€${bill.amount.toFixed(2)}</div></div>
+    <div class="detail-field"><div class="detail-key">Consumption</div><div class="detail-val">${bill.consumption || '-'}</div></div>
+    <div class="detail-field"><div class="detail-key">Period</div><div class="detail-val">${bill.period}</div></div>
+    <div class="detail-field"><div class="detail-key">Notes</div><div class="detail-val">${bill.notes || '-'}</div></div>
+    <div class="detail-field"><div class="detail-key">Extracted text</div><div class="detail-val">${bill.text || '-'}</div></div>
+  `;
+  modal.classList.remove('hidden');
+}
+
+function closeModal() {
+  document.getElementById('billModal').classList.add('hidden');
+}
+
+/* -----------------------------
+   HOUSEHOLD MANAGEMENT
+----------------------------- */
+function renderMembers() {
+  const container = document.getElementById('members-list');
+  container.innerHTML = '';
+  state.household.members.forEach(m => {
+    const item = document.createElement('div'); item.className = 'member-item';
+    item.innerHTML = `<div class="member-avatar">${m.name[0].toUpperCase()}</div><div>${m.name} ${m.role === 'owner' ? '(Owner)' : ''}</div>`;
+    container.appendChild(item);
+  });
+}
+
+function copyCode() {
+  navigator.clipboard.writeText(state.household.code).then(() => alert('Invite code copied!'));
+}
+
+function joinHousehold() {
+  const code = document.getElementById('join-code').value.trim().toUpperCase();
+  if (!code || code !== state.household.code) { alert('Invalid code'); return; }
+  const newMember = { name: state.user.name, id: state.user.id, role: 'member' };
+  if (!state.household.members.find(m => m.id === state.user.id)) {
+    state.household.members.push(newMember);
+    ls('billio_household', state.household);
+    renderMembers();
+    alert('Joined household!');
+  }
+}
+
+/* -----------------------------
+   SETTINGS
+----------------------------- */
+function showSettingsModal() { document.getElementById('settingsModal').classList.remove('hidden'); }
+function closeSettings() { document.getElementById('settingsModal').classList.add('hidden'); }
+
+function saveSettings() {
+  const sbUrl = document.getElementById('cfg-sb-url').value.trim();
+  const sbKey = document.getElementById('cfg-sb-key').value.trim();
+  const gemKey = document.getElementById('cfg-gemini-key').value.trim();
+  if (sbUrl) ls('sb_url', sbUrl);
+  if (sbKey) ls('sb_key', sbKey);
+  if (gemKey) { ls('gemini_key', gemKey); document.getElementById('geminiBadge').style.display = 'inline-flex'; }
+  alert('Settings saved!');
+  closeSettings();
+}
+
+/* -----------------------------
+   RESET APP
+----------------------------- */
+function resetApp() {
+  if (confirm('This will reset all your data. Continue?')) {
+    localStorage.clear();
+    location.reload();
+  }
+}
+
+/* -----------------------------
+   INITIALIZE APP
+----------------------------- */
+initApp();
+</script>
+
+</body>
+</html>
