@@ -293,15 +293,19 @@
         <div class="screen" id="screen-add">
           <div class="card" style="margin-bottom:14px">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-              <div class="card-title" style="margin-bottom:0">Upload Bill Photo</div>
+              <div class="card-title" style="margin-bottom:0">Add Bill</div>
               <div class="gemini-badge">✦ Gemini AI</div>
             </div>
-            <div class="upload-zone" id="uploadZone" onclick="document.getElementById('photoInput').click()">
-              <div class="upload-icon">📸</div>
-              <div class="upload-text">Tap to photograph your bill</div>
-              <div class="upload-sub">AI reads the amount, type & consumption automatically</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px" id="uploadZone">
+              <button class="btn btn-primary btn-full" onclick="document.getElementById('photoInputCamera').click()" style="background:var(--accent2)">
+                <span style="font-size:20px">📷</span> Take Photo
+              </button>
+              <button class="btn btn-primary btn-full" onclick="document.getElementById('photoInputGallery').click()" style="background:var(--accent2)">
+                <span style="font-size:20px">🖼️</span> Upload Photo
+              </button>
             </div>
-            <input type="file" id="photoInput" accept="image/*" capture="environment" onchange="handlePhoto(this)">
+            <input type="file" id="photoInputCamera" accept="image/*" capture="environment" onchange="handlePhoto(this)" style="display:none">
+            <input type="file" id="photoInputGallery" accept="image/*" onchange="handlePhoto(this)" style="display:none">
             <img id="photoPreview" class="photo-preview" style="display:none" alt="Bill preview">
           </div>
 
@@ -588,9 +592,10 @@ function resetAddForm() {
   document.getElementById('extracting-status').style.display = 'none';
   document.getElementById('extracted-data').style.display = 'none';
   document.getElementById('no-key-warning').style.display = 'none';
-  document.getElementById('uploadZone').style.display = 'block';
+  document.getElementById('uploadZone').style.display = 'grid';
   document.getElementById('manual-trigger').style.display = 'block';
-  document.getElementById('photoInput').value = '';
+  document.getElementById('photoInputCamera').value = '';
+  document.getElementById('photoInputGallery').value = '';
   state.photoData = null;
 }
 
