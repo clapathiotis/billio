@@ -635,6 +635,20 @@ async function extractWithGemini(b64, mimeType) {
     debugEl.style.display = 'block';
   }
   
+  // Check if API key is set
+  if (!geminiKey || geminiKey.trim() === '') {
+    debug('❌ NO GEMINI API KEY SET');
+    debug('');
+    debug('Go to Settings (gear icon) and add your');
+    debug('Gemini API key from aistudio.google.com');
+    document.getElementById('extract-result-msg').textContent = '❌ No Gemini key — add one in Settings';
+    document.getElementById('extracting-status').style.display = 'none';
+    document.getElementById('extracted-data').style.display = 'block';
+    return;
+  }
+  
+  debug('🔑 Key found: ' + geminiKey.substring(0, 10) + '...');
+  
   try {
     debug('🔄 Sending to Gemini...');
     
@@ -654,8 +668,16 @@ async function extractWithGemini(b64, mimeType) {
     );
     
     if (!res.ok) {
-      debug('❌ HTTP Error: ' + res.status + ' ' + res.statusText);
-      showExtractionError('⚠ API error: ' + res.status);
+      debug('❌ HTTP Error: ' + res.status);
+      if (res.status === 404) {
+        debug('API key might be invalid or missing');
+        debug('Check Settings → Gemini API Key');
+      } else if (res.status === 403) {
+        debug('API key not authorized');
+      } else if (res.status === 400) {
+        debug('Invalid request format');
+      }
+      showExtractionError('⚠ API error ' + res.status + ' - check Settings');
       return;
     }
     
@@ -663,7 +685,7 @@ async function extractWithGemini(b64, mimeType) {
     debug('✓ Got response from Gemini');
     
     if (data.error) {
-      debug('❌ API Error: ' + JSON.stringify(data.error));
+      debug('❌ API Error: ' + data.error.message);
       showExtractionError('⚠ API error: ' + data.error.message);
       return;
     }
