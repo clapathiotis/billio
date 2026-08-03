@@ -477,6 +477,18 @@ function genCode() { return Math.random().toString(36).substr(2, 6).toUpperCase(
 function showStep(id) {
   document.querySelectorAll('.setup-step').forEach(s => s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
+  
+  // Auto-fill Supabase URL and key if on Supabase step
+  if (id === 'step-supabase') {
+    const urlField = document.getElementById('sb-url');
+    const keyField = document.getElementById('sb-key');
+    if (urlField && !urlField.value) {
+      urlField.value = 'https://caibqlebzcjaifxzutec.supabase.co';
+    }
+    if (keyField && !keyField.value) {
+      keyField.value = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNhaWJxbGViemNqYWlmeHp1dGVjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUzOTAwNjgsImV4cCI6MjA5MDk2NjA2OH0.w9w06RSHDxeIT538kUUFmpbQ7VnvRPaR_aCKVnrKufk';
+    }
+  }
 }
 
 function saveSupabase() {
@@ -484,6 +496,7 @@ function saveSupabase() {
   const key = document.getElementById('sb-key').value.trim();
   if (!url || !key) { alert('Please enter both fields'); return; }
   ls('sb_url', url); ls('sb_key', key);
+  alert('✓ Supabase configured! Bills will now sync to the cloud.');
   showStep('step-gemini');
 }
 
@@ -501,6 +514,37 @@ function finishSetup() {
   ls('billio_user', user); ls('billio_household', household); ls('billio_bills', []);
   state.user = user; state.household = household; state.bills = [];
   initApp();
+}
+
+async function loadBillsFromSupabase() {
+  const url = ls('sb_url'), key = ls('sb_key');
+  if (!url || !key) return;
+  try {
+    const householdCode = state.household?.code;
+    const res = await fetch(url + '/rest/v1/bills?household_code=eq.' + householdCode + '&order=date.desc', {
+      method: 'GET',
+      headers: { 'apikey': key, 'Authorization': 'Bearer ' + key }
+    });
+    if (res.ok) {
+      const bills = await res.json();
+      state.bills = bills.map(b => ({
+        id: b.id,
+        type: b.type,
+        amount: b.amount,
+        consumption: b.consumption,
+        period: b.period,
+        notes: b.notes,
+        text: b.raw_text,
+        photo: b.photo_url,
+        date: b.date,
+        addedBy: b.added_by,
+        household: b.household_code
+      }));
+      console.log('✓ Loaded', state.bills.length, 'bills from Supabase');
+    }
+  } catch (e) {
+    console.log('Could not load from Supabase (may not be configured)');
+  }
 }
 
 function initApp() {
@@ -522,6 +566,9 @@ function initApp() {
   const mc = state.household.members?.length || 1;
   document.getElementById('household-member-count').textContent = mc + ' member' + (mc !== 1 ? 's' : '');
   renderMembers(); renderDashboard(); renderBills();
+  
+  // Load bills from Supabase (cross-device persistence)
+  loadBillsFromSupabase();
 }
 
 function showScreen(name) {
@@ -642,15 +689,66 @@ function saveBill() {
 
 async function syncToSupabase(bill) {
   const url = ls('sb_url'), key = ls('sb_key');
-  if (!url || !key) return;
+  if (!url || !key) {
+    console.log('Supabase not configured — bill saved locally only');
+    return;
+  }
   try {
-    const payload = { ...bill }; delete payload.photo;
-    await fetch(url + '/rest/v1/bills', {
+    let photoUrl = null;
+    
+    // Upload photo to Supabase Storage if present
+    if (bill.photo) {
+      try {
+        const photoFilename = 'photos/' + bill.id + '.jpg';
+        const base64Data = bill.photo.split(',')[1];
+        const binaryString = atob(base64Data);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
+        
+        const uploadRes = await fetch(url + '/storage/v1/object/bills/' + photoFilename, {
+          method: 'POST',
+          headers: { 'apikey': key, 'Authorization': 'Bearer ' + key },
+          body: bytes
+        });
+        
+        if (uploadRes.ok) {
+          photoUrl = url + '/storage/v1/object/public/bills/' + photoFilename;
+        }
+      } catch (photoErr) {
+        console.warn('Photo upload failed:', photoErr);
+      }
+    }
+    
+    // Save bill to database with correct field mapping
+    const payload = {
+      id: bill.id,
+      type: bill.type,
+      amount: bill.amount,
+      consumption: bill.consumption || null,
+      period: bill.period || null,
+      notes: bill.notes || null,
+      raw_text: bill.text || null,
+      photo_url: photoUrl,
+      added_by: bill.addedBy,
+      date: bill.date,
+      household_code: bill.household,
+      created_at: bill.date
+    };
+    
+    const saveRes = await fetch(url + '/rest/v1/bills', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'apikey': key, 'Authorization': 'Bearer ' + key, 'Prefer': 'return=minimal' },
       body: JSON.stringify(payload)
     });
-  } catch (e) {}
+    
+    if (!saveRes.ok) {
+      console.warn('Bill save to Supabase failed:', saveRes.status, saveRes.statusText);
+    } else {
+      console.log('✓ Bill synced to Supabase:', bill.id);
+    }
+  } catch (e) {
+    console.error('Supabase sync error:', e);
+  }
 }
 
 function renderDashboard() {
