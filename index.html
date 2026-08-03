@@ -318,6 +318,7 @@
 
           <div id="extracted-data" style="display:none">
             <div class="alert alert-success" id="extract-result-msg">✓ Details extracted — review and confirm</div>
+            <div id="debug-section" style="display:none;background:var(--bg3);border-radius:12px;padding:12px;margin-bottom:12px;font-size:12px;color:var(--text2);max-height:150px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;font-family:var(--mono)"></div>
             <div class="card">
               <div class="card-title">Bill Details</div>
               <div class="form-group">
@@ -626,7 +627,17 @@ async function handlePhoto(input) {
 
 async function extractWithGemini(b64, mimeType) {
   const geminiKey = ls('gemini_key');
+  const debugEl = document.getElementById('debug-section');
+  
+  function debug(msg) {
+    console.log(msg);
+    debugEl.textContent += (debugEl.textContent ? '\n' : '') + msg;
+    debugEl.style.display = 'block';
+  }
+  
   try {
+    debug('🔄 Sending to Gemini...');
+    
     const res = await fetch(
       'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + geminiKey,
       {
@@ -643,26 +654,26 @@ async function extractWithGemini(b64, mimeType) {
     );
     
     if (!res.ok) {
-      console.error('Gemini HTTP error:', res.status, res.statusText);
-      showExtractionError('⚠ API error — please fill in manually');
+      debug('❌ HTTP Error: ' + res.status + ' ' + res.statusText);
+      showExtractionError('⚠ API error: ' + res.status);
       return;
     }
     
     const data = await res.json();
-    console.log('Full Gemini response:', JSON.stringify(data));
+    debug('✓ Got response from Gemini');
     
     if (data.error) {
-      console.error('Gemini returned error:', data.error);
+      debug('❌ API Error: ' + JSON.stringify(data.error));
       showExtractionError('⚠ API error: ' + data.error.message);
       return;
     }
     
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    console.log('Gemini text:', text);
+    debug('📝 Gemini returned: ' + text.substring(0, 200) + (text.length > 200 ? '...' : ''));
     
     if (!text) {
-      console.error('No text in Gemini response');
-      showExtractionError('⚠ No response from Gemini — please fill in manually');
+      debug('❌ No text in response');
+      showExtractionError('⚠ No response from Gemini');
       return;
     }
     
@@ -673,40 +684,56 @@ async function extractWithGemini(b64, mimeType) {
     if (match) {
       try {
         info = JSON.parse(match[0]);
-        console.log('✓ Successfully parsed JSON:', info);
+        debug('✓ JSON Parsed: type=' + info.type + ', amount=' + info.amount);
       } catch (parseErr) {
-        console.error('JSON parse failed:', parseErr);
-        console.log('Raw JSON string was:', match[0]);
-        showExtractionError('⚠ Could not parse extraction — please fill in manually');
+        debug('❌ JSON parse failed: ' + parseErr.message);
+        showExtractionError('⚠ Could not parse response');
         return;
       }
     } else {
-      console.error('No JSON object found in response. Text was:', text);
-      showExtractionError('⚠ Could not extract JSON — please fill in manually');
+      debug('❌ No JSON in response');
+      showExtractionError('⚠ Could not find JSON in response');
       return;
     }
     
-    // Populate fields with extracted data
+    // Populate fields
+    debug('📋 Filling form fields...');
     if (info.type && ['electricity', 'water', 'wifi', 'other'].includes(info.type)) {
       document.getElementById('bill-type').value = info.type;
+      debug('  ✓ Type: ' + info.type);
     }
     
     if (info.amount) {
       const amt = parseFloat(info.amount);
-      if (!isNaN(amt)) document.getElementById('bill-amount').value = amt.toFixed(2);
+      if (!isNaN(amt)) {
+        document.getElementById('bill-amount').value = amt.toFixed(2);
+        debug('  ✓ Amount: €' + amt.toFixed(2));
+      }
     }
     
-    if (info.consumption) document.getElementById('bill-consumption').value = String(info.consumption).trim();
-    if (info.period) document.getElementById('bill-period').value = String(info.period).trim();
-    if (info.provider) document.getElementById('bill-notes').value = String(info.provider).trim();
-    if (info.raw_text) document.getElementById('bill-text').value = String(info.raw_text).trim();
+    if (info.consumption) {
+      document.getElementById('bill-consumption').value = String(info.consumption).trim();
+      debug('  ✓ Consumption: ' + info.consumption);
+    }
+    if (info.period) {
+      document.getElementById('bill-period').value = String(info.period).trim();
+      debug('  ✓ Period: ' + info.period);
+    }
+    if (info.provider) {
+      document.getElementById('bill-notes').value = String(info.provider).trim();
+      debug('  ✓ Provider: ' + info.provider);
+    }
+    if (info.raw_text) {
+      document.getElementById('bill-text').value = String(info.raw_text).trim();
+      debug('  ✓ Text extracted');
+    }
     
-    console.log('✓ Form populated successfully');
+    debug('✅ ALL DONE - Review and save!');
     document.getElementById('extract-result-msg').textContent = '✓ Gemini extracted details — review and confirm';
     
   } catch (e) {
-    console.error('Extraction exception:', e);
-    showExtractionError('⚠ Extraction error: ' + e.message);
+    debug('❌ Exception: ' + e.message);
+    showExtractionError('⚠ Error: ' + e.message);
   }
   
   document.getElementById('extracting-status').style.display = 'none';
