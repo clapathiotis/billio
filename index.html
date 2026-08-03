@@ -635,28 +635,51 @@ async function extractWithGemini(b64, mimeType) {
         body: JSON.stringify({
           contents: [{ parts: [
             { inline_data: { mime_type: mimeType, data: b64 } },
-            { text: 'Extract bill info from this image. Reply ONLY with valid JSON, no markdown: {"type":"electricity|water|wifi|other","amount":0.00,"currency":"EUR","consumption":"","period":"","provider":"","raw_text":""}. amount must be a float. Infer type from context.' }
+            { text: 'Extract bill information from this image. Return ONLY a JSON object (no markdown, no extra text). Use this exact format: {"type":"electricity|water|wifi|other","amount":0.00,"consumption":"","period":"","provider":"","raw_text":""}. Rules: 1) amount must be a number (float), infer from total/due amount, 2) type: infer from bill (electricity/power, water, internet/wifi/broadband, or other), 3) consumption: kWh, m³, GB or similar usage value, 4) period: date range if visible, 5) provider: company/utility name, 6) raw_text: all readable text from bill.' }
           ]}],
-          generationConfig: { temperature: 0.1, maxOutputTokens: 600 }
+          generationConfig: { temperature: 0.1, maxOutputTokens: 800 }
         })
       }
     );
     const data = await res.json();
+    
+    if (data.error) {
+      console.error('Gemini API error:', data.error);
+      document.getElementById('extract-result-msg').textContent = '⚠ API error — please fill in manually';
+      document.getElementById('extracting-status').style.display = 'none';
+      document.getElementById('extracted-data').style.display = 'block';
+      return;
+    }
+    
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    console.log('Gemini response:', text);
+    
+    // Try to find JSON in the response (handle various formats)
     const match = text.match(/\{[\s\S]*\}/);
     if (match) {
-      const info = JSON.parse(match[0]);
-      document.getElementById('bill-type').value = info.type || 'other';
-      document.getElementById('bill-amount').value = info.amount || '';
-      document.getElementById('bill-consumption').value = info.consumption || '';
-      document.getElementById('bill-period').value = info.period || '';
-      document.getElementById('bill-notes').value = info.provider || '';
-      document.getElementById('bill-text').value = info.raw_text || '';
-      document.getElementById('extract-result-msg').textContent = '✓ Gemini extracted details — review and confirm';
+      try {
+        const info = JSON.parse(match[0]);
+        console.log('Parsed extraction:', info);
+        
+        // Populate form fields with extracted data
+        if (info.type) document.getElementById('bill-type').value = info.type;
+        if (info.amount) document.getElementById('bill-amount').value = parseFloat(info.amount) || '';
+        if (info.consumption) document.getElementById('bill-consumption').value = info.consumption;
+        if (info.period) document.getElementById('bill-period').value = info.period;
+        if (info.provider) document.getElementById('bill-notes').value = info.provider;
+        if (info.raw_text) document.getElementById('bill-text').value = info.raw_text;
+        
+        document.getElementById('extract-result-msg').textContent = '✓ Gemini extracted details — review and confirm';
+      } catch (parseErr) {
+        console.error('JSON parse error:', parseErr, 'from:', match[0]);
+        document.getElementById('extract-result-msg').textContent = '⚠ Could not parse extraction — please fill in manually';
+      }
     } else {
+      console.warn('No JSON found in response:', text);
       document.getElementById('extract-result-msg').textContent = '⚠ Could not extract — please fill in manually';
     }
   } catch (e) {
+    console.error('Extraction error:', e);
     document.getElementById('extract-result-msg').textContent = '⚠ Extraction error — please fill in manually';
   }
   document.getElementById('extracting-status').style.display = 'none';
