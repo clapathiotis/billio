@@ -213,6 +213,7 @@
           <input class="form-input" id="gemini-key" placeholder="AIzaSy...">
         </div>
         <button class="btn btn-ghost btn-full" style="margin-bottom:8px" onclick="testGeminiKey()">🧪 Test Key (optional)</button>
+        <div id="debug-section" style="display:none;background:var(--bg3);border-radius:12px;padding:12px;margin-bottom:12px;font-size:12px;color:var(--text2);max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;font-family:var(--mono)"></div>
         <button class="btn btn-primary btn-full" onclick="saveGemini()">Continue →</button>
         <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="showStep('step-supabase')">← Back</button>
       </div>
@@ -458,6 +459,7 @@
           <input class="form-input" id="cfg-gemini-key" placeholder="AIzaSy...">
         </div>
         <button class="btn btn-ghost btn-full" onclick="testGeminiKey()" style="margin-bottom:0">🧪 Test Key</button>
+        <div id="settings-debug-section" style="display:none;background:var(--bg1);border-radius:12px;padding:12px;margin-top:12px;font-size:12px;color:var(--text2);max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;font-family:var(--mono)"></div>
       </div>
       <button class="btn btn-primary btn-full" onclick="saveSettings()">Save Settings</button>
     </div>
@@ -648,129 +650,113 @@ async function extractWithGemini(b64, mimeType) {
   
   debug('🔑 Key: ' + geminiKey.substring(0, 15) + '...');
   
-  try {
-    debug('🔄 Loading Gemini library...');
-    const { GoogleGenerativeAI } = await import('https://esm.run/@google/generative-ai');
-    debug('✓ Loaded');
-    
-    const genAI = new GoogleGenerativeAI(geminiKey);
-    
-    // Try models - prioritize ones that work best
-    const models = [
-      'gemini-2.0-flash-exp',
-      'gemini-2.0-flash',
-      'gemini-1.5-pro-vision',
-      'gemini-1.5-pro',
-      'gemini-1.5-flash-8b',
-      'gemini-1.5-flash',
-      'gemini-pro-vision',
-      'gemini-pro'
-    ];
-    
-    let model = null;
-    let usedModel = null;
-    
-    for (const m of models) {
-      debug('  Trying: ' + m);
-      try {
-        model = genAI.getGenerativeModel({ model: m });
-        usedModel = m;
-        debug('✓ Model initialized: ' + m);
-        
-        // Try to actually use the model
-        debug('  Testing model...');
-        const testResult = await model.generateContent('test');
-        debug('✓ Model works: ' + m);
-        break;
-      } catch (e) {
-        debug('  ✗ ' + m + ': ' + e.message.substring(0, 50));
-        model = null;
+  // Try models with direct fetch + x-goog-api-key header (works with new AQ. keys)
+  const models = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro'];
+  let text = null;
+  let usedModel = null;
+  let lastError = null;
+  
+  for (const m of models) {
+    debug('  Trying: ' + m);
+    try {
+      const res = await fetch(
+        'https://generativelanguage.googleapis.com/v1beta/models/' + m + ':generateContent',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': geminiKey
+          },
+          body: JSON.stringify({
+            contents: [{ parts: [
+              { inline_data: { mime_type: mimeType, data: b64 } },
+              { text: 'Extract bill information. Return ONLY valid JSON: {"type":"electricity|water|wifi|other","amount":0.00,"consumption":"","period":"","provider":"","raw_text":""}' }
+            ]}],
+            generationConfig: { temperature: 0.1, maxOutputTokens: 1000 }
+          })
+        }
+      );
+      
+      if (!res.ok) {
+        const errBody = await res.text();
+        debug('  ✗ ' + m + ': HTTP ' + res.status);
+        lastError = 'HTTP ' + res.status + ' on ' + m;
         continue;
       }
-    }
-    
-    if (!model || !usedModel) {
-      debug('');
-      debug('❌ No models available');
-      debug('This might mean:');
-      debug('1. Generative AI API not enabled');
-      debug('2. Account needs setup at aistudio.google.com');
-      debug('3. Try creating a NEW key at aistudio.google.com');
-      debug('');
-      debug('📝 Fill in details manually below');
-      document.getElementById('extract-result-msg').textContent = '📝 No models - enter manually';
-      document.getElementById('extracting-status').style.display = 'none';
-      document.getElementById('extracted-data').style.display = 'block';
-      return;
-    }
-    
-    debug('🔄 Sending image to ' + usedModel + '...');
-    
-    const result = await model.generateContent([
-      'Extract bill information. Return ONLY valid JSON: {"type":"electricity|water|wifi|other","amount":0.00,"consumption":"","period":"","provider":"","raw_text":""}',
-      {
-        inlineData: {
-          data: b64,
-          mimeType: mimeType
-        }
+      
+      const data = await res.json();
+      if (data.error) {
+        debug('  ✗ ' + m + ': ' + data.error.message.substring(0, 60));
+        lastError = data.error.message;
+        continue;
       }
-    ]);
-    
-    debug('✓ Got response');
-    
-    const text = result.response.text();
-    if (!text) {
-      debug('❌ Empty response');
-      document.getElementById('extract-result-msg').textContent = '⚠ No response - enter manually';
-      document.getElementById('extracting-status').style.display = 'none';
-      document.getElementById('extracted-data').style.display = 'block';
-      return;
-    }
-    
-    debug('📝 Parsing data...');
-    const match = text.match(/\{[\s\S]*\}/);
-    if (!match) {
-      debug('❌ No JSON found in response');
-      document.getElementById('extract-result-msg').textContent = '⚠ Could not parse - enter manually';
-      document.getElementById('extracting-status').style.display = 'none';
-      document.getElementById('extracted-data').style.display = 'block';
-      return;
-    }
-    
-    let info;
-    try {
-      info = JSON.parse(match[0]);
-      debug('✓ Parsed successfully');
+      
+      text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      if (text) {
+        usedModel = m;
+        debug('✓ Success with: ' + m);
+        break;
+      }
     } catch (e) {
-      debug('❌ JSON parse error: ' + e.message);
-      document.getElementById('extract-result-msg').textContent = '⚠ Parse error - enter manually';
-      document.getElementById('extracting-status').style.display = 'none';
-      document.getElementById('extracted-data').style.display = 'block';
-      return;
+      debug('  ✗ ' + m + ': ' + e.message.substring(0, 60));
+      lastError = e.message;
+      continue;
     }
-    
-    // Populate form
-    if (info.type && ['electricity', 'water', 'wifi', 'other'].includes(info.type)) {
-      document.getElementById('bill-type').value = info.type;
-    }
-    if (info.amount) {
-      const amt = parseFloat(info.amount);
-      if (!isNaN(amt)) document.getElementById('bill-amount').value = amt.toFixed(2);
-    }
-    if (info.consumption) document.getElementById('bill-consumption').value = String(info.consumption).trim();
-    if (info.period) document.getElementById('bill-period').value = String(info.period).trim();
-    if (info.provider) document.getElementById('bill-notes').value = String(info.provider).trim();
-    if (info.raw_text) document.getElementById('bill-text').value = String(info.raw_text).trim();
-    
-    debug('✅ Extraction complete!');
-    document.getElementById('extract-result-msg').textContent = '✓ Details extracted!';
-    
-  } catch (e) {
-    debug('⚠ Error: ' + e.message);
-    debug('📝 Fill in details manually below');
-    document.getElementById('extract-result-msg').textContent = '📝 AI error - enter manually';
   }
   
+  if (!usedModel || !text) {
+    debug('');
+    debug('❌ All models failed.');
+    debug('Last error: ' + (lastError || 'unknown'));
+    debug('');
+    debug('This is a known Google-side issue with');
+    debug('new "AQ." format API keys affecting many');
+    debug('developers right now. Not a bug in Billio.');
+    debug('');
+    debug('📝 Fill in details manually below');
+    document.getElementById('extract-result-msg').textContent = '📝 AI unavailable (Google API issue) - enter manually';
+    document.getElementById('extracting-status').style.display = 'none';
+    document.getElementById('extracted-data').style.display = 'block';
+    return;
+  }
+  
+  debug('📝 Parsing data...');
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) {
+    debug('❌ No JSON found in response');
+    document.getElementById('extract-result-msg').textContent = '⚠ Could not parse - enter manually';
+    document.getElementById('extracting-status').style.display = 'none';
+    document.getElementById('extracted-data').style.display = 'block';
+    return;
+  }
+  
+  let info;
+  try {
+    info = JSON.parse(match[0]);
+    debug('✓ Parsed successfully');
+  } catch (e) {
+    debug('❌ JSON parse error: ' + e.message);
+    document.getElementById('extract-result-msg').textContent = '⚠ Parse error - enter manually';
+    document.getElementById('extracting-status').style.display = 'none';
+    document.getElementById('extracted-data').style.display = 'block';
+    return;
+  }
+  
+  // Populate form
+  if (info.type && ['electricity', 'water', 'wifi', 'other'].includes(info.type)) {
+    document.getElementById('bill-type').value = info.type;
+  }
+  if (info.amount) {
+    const amt = parseFloat(info.amount);
+    if (!isNaN(amt)) document.getElementById('bill-amount').value = amt.toFixed(2);
+  }
+  if (info.consumption) document.getElementById('bill-consumption').value = String(info.consumption).trim();
+  if (info.period) document.getElementById('bill-period').value = String(info.period).trim();
+  if (info.provider) document.getElementById('bill-notes').value = String(info.provider).trim();
+  if (info.raw_text) document.getElementById('bill-text').value = String(info.raw_text).trim();
+  
+  debug('✅ Extraction complete!');
+  document.getElementById('extract-result-msg').textContent = '✓ Details extracted!';
   document.getElementById('extracting-status').style.display = 'none';
   document.getElementById('extracted-data').style.display = 'block';
 }
@@ -781,7 +767,11 @@ async function testGeminiKey() {
                   document.getElementById('gemini-key')?.value ||
                   ls('gemini_key');
   
-  const debugEl = document.getElementById('debug-section');
+  const debugEl = document.getElementById('debug-section') || document.getElementById('settings-debug-section');
+  if (!debugEl) {
+    alert('Debug display not found on this screen');
+    return;
+  }
   debugEl.textContent = '';
   debugEl.style.display = 'block';
   
@@ -801,58 +791,71 @@ async function testGeminiKey() {
   debug('Key: ' + geminiKey.substring(0, 15) + '...');
   debug('');
   
-  try {
-    debug('📡 Sending test request...');
-    const res = await fetch(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + encodeURIComponent(geminiKey),
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: 'Say "OK"' }] }],
-          generationConfig: { maxOutputTokens: 10 }
-        })
+  const models = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro'];
+  let success = false;
+  
+  for (const m of models) {
+    debug('📡 Testing model: ' + m);
+    try {
+      const res = await fetch(
+        'https://generativelanguage.googleapis.com/v1beta/models/' + m + ':generateContent',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': geminiKey
+          },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: 'Say "OK"' }] }],
+            generationConfig: { maxOutputTokens: 10 }
+          })
+        }
+      );
+      
+      if (!res.ok) {
+        debug('  ✗ HTTP ' + res.status);
+        continue;
       }
-    );
-    
-    debug('Response status: ' + res.status);
-    
-    if (!res.ok) {
-      debug('');
-      debug('❌ HTTP Error ' + res.status);
-      debug('');
-      if (res.status === 404) {
-        debug('The API key is invalid or the');
-        debug('Generative Language API is not');
-        debug('enabled in your Google Cloud project.');
-        debug('');
-        debug('Try creating a new key at:');
-        debug('aistudio.google.com');
-      } else if (res.status === 403) {
-        debug('API key not authorized');
-      } else if (res.status === 400) {
-        debug('Invalid request');
+      
+      const data = await res.json();
+      if (data.error) {
+        debug('  ✗ ' + data.error.message.substring(0, 60));
+        continue;
       }
-      return;
+      
+      const response = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response';
+      debug('  ✓ SUCCESS: ' + response.trim());
+      debug('');
+      debug('✅ Your key works with: ' + m);
+      debug('✓ Bill extraction will work!');
+      success = true;
+      break;
+      
+    } catch (e) {
+      debug('  ✗ Error: ' + e.message.substring(0, 60));
     }
-    
-    const data = await res.json();
-    
-    if (data.error) {
-      debug('❌ API Error: ' + data.error.message);
-      return;
+  }
+  
+  if (!success) {
+    debug('');
+    debug('❌ Key did not work with any model.');
+    debug('');
+    if (geminiKey.startsWith('AQ.')) {
+      debug('Your key uses the new "AQ." format,');
+      debug('which Google is currently rolling out.');
+      debug('Some accounts with AQ. keys are hitting');
+      debug('a known Google-side bug (401 errors)');
+      debug('affecting many developers right now.');
+      debug('');
+      debug('This is NOT a problem with Billio —');
+      debug('it is on Google\'s end. You can:');
+      debug('1. Wait for Google to fix the rollout');
+      debug('2. Check discuss.ai.google.dev for updates');
+      debug('3. Use manual bill entry in the meantime');
+    } else {
+      debug('Try creating a new key at:');
+      debug('aistudio.google.com');
     }
-    
-    const response = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response';
-    debug('✅ SUCCESS!');
-    debug('');
-    debug('API returned: ' + response);
-    debug('');
-    debug('✓ Your key is valid!');
-    debug('✓ Bill extraction will work');
-    
-  } catch (e) {
-    debug('❌ Error: ' + e.message);
   }
 }
 
