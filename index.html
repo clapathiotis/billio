@@ -638,42 +638,50 @@ async function extractWithGemini(b64, mimeType) {
     debugEl.style.display = 'block';
   }
   
-  // Check if API key is set
   if (!geminiKey || geminiKey.trim() === '') {
     debug('❌ NO GEMINI API KEY SET');
-    debug('');
-    debug('Go to Settings and add your');
-    debug('Gemini API key from aistudio.google.com');
     showExtractionError('❌ No Gemini key — add one in Settings');
     return;
   }
   
   debug('🔑 Key found: ' + geminiKey.substring(0, 10) + '...');
   
-  // Check key format
   if (!geminiKey.startsWith('AIza')) {
-    debug('❌ Invalid key format!');
-    debug('');
-    debug('Key should start with "AIza..."');
-    debug('Get it from: aistudio.google.com');
-    debug('(NOT from Google Cloud Console)');
-    showExtractionError('❌ Invalid API key format - get from aistudio.google.com');
+    debug('❌ Invalid key format - should start with AIza');
+    showExtractionError('❌ Invalid API key - get from aistudio.google.com');
     return;
   }
   
   try {
     debug('🔄 Loading Gemini library...');
-    
-    // Load library dynamically
     const { GoogleGenerativeAI } = await import('https://esm.run/@google/generative-ai');
-    
     debug('✓ Library loaded');
-    debug('🔄 Initializing Gemini...');
     
     const genAI = new GoogleGenerativeAI(geminiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
     
-    debug('✓ Connected to Gemini');
+    // Try different models - some are more available on free tier
+    const modelsToTry = ['gemini-pro-vision', 'gemini-1.5-flash', 'gemini-pro'];
+    let model = null;
+    let usedModel = null;
+    
+    for (const modelName of modelsToTry) {
+      debug('🔄 Trying model: ' + modelName);
+      try {
+        model = genAI.getGenerativeModel({ model: modelName });
+        usedModel = modelName;
+        debug('✓ Using model: ' + modelName);
+        break;
+      } catch (e) {
+        debug('  ✗ ' + modelName + ' not available');
+      }
+    }
+    
+    if (!model) {
+      debug('❌ No supported models found');
+      showExtractionError('⚠ No models available - check API key');
+      return;
+    }
+    
     debug('🔄 Sending image...');
     
     const result = await model.generateContent([
@@ -686,10 +694,10 @@ async function extractWithGemini(b64, mimeType) {
       }
     ]);
     
-    debug('✓ Got response from Gemini');
+    debug('✓ Got response');
     
     const text = result.response.text();
-    debug('📝 Response: ' + text.substring(0, 150) + (text.length > 150 ? '...' : ''));
+    debug('📝 Response: ' + text.substring(0, 100) + '...');
     
     if (!text) {
       debug('❌ Empty response');
@@ -697,10 +705,9 @@ async function extractWithGemini(b64, mimeType) {
       return;
     }
     
-    // Parse JSON
     const match = text.match(/\{[\s\S]*\}/);
     if (!match) {
-      debug('❌ No JSON in response');
+      debug('❌ No JSON found');
       showExtractionError('⚠ Could not find JSON');
       return;
     }
@@ -710,12 +717,11 @@ async function extractWithGemini(b64, mimeType) {
       info = JSON.parse(match[0]);
       debug('✓ Parsed: type=' + info.type + ', amount=' + info.amount);
     } catch (e) {
-      debug('❌ JSON parse error: ' + e.message);
-      showExtractionError('⚠ Could not parse response');
+      debug('❌ JSON parse failed');
+      showExtractionError('⚠ Could not parse');
       return;
     }
     
-    // Fill form
     debug('📋 Filling form...');
     if (info.type && ['electricity', 'water', 'wifi', 'other'].includes(info.type)) {
       document.getElementById('bill-type').value = info.type;
@@ -750,9 +756,6 @@ async function extractWithGemini(b64, mimeType) {
     
   } catch (e) {
     debug('❌ Error: ' + e.message);
-    if (e.message.includes('401') || e.message.includes('unauthorized')) {
-      debug('Check your API key is correct');
-    }
     showExtractionError('⚠ ' + e.message);
   }
   
