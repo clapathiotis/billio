@@ -157,6 +157,7 @@
 </style>
 </head>
 <body>
+<script src="https://cdn.jsdelivr.net/npm/@google/generative-ai@0.3.0/dist/index.min.js"></script>
 <div class="app" id="app">
 
   <!-- SETUP WIZARD -->
@@ -212,6 +213,7 @@
           <label class="form-label">Gemini API Key</label>
           <input class="form-input" id="gemini-key" placeholder="AIzaSy...">
         </div>
+        <button class="btn btn-ghost btn-full" style="margin-bottom:8px" onclick="testGeminiKey()">🧪 Test Key (optional)</button>
         <button class="btn btn-primary btn-full" onclick="saveGemini()">Continue →</button>
         <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="showStep('step-supabase')">← Back</button>
       </div>
@@ -452,10 +454,11 @@
       <div style="background:var(--bg3);border-radius:12px;padding:14px;margin-bottom:16px">
         <div style="font-size:13px;font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:8px">✦ Gemini AI <div class="gemini-badge">free</div></div>
         <div style="font-size:12px;color:var(--text2);margin-bottom:12px">Get free key at aistudio.google.com</div>
-        <div class="form-group" style="margin-bottom:0">
+        <div class="form-group">
           <label class="form-label">Gemini API Key</label>
           <input class="form-input" id="cfg-gemini-key" placeholder="AIzaSy...">
         </div>
+        <button class="btn btn-ghost btn-full" onclick="testGeminiKey()" style="margin-bottom:0">🧪 Test Key</button>
       </div>
       <button class="btn btn-primary btn-full" onclick="saveSettings()">Save Settings</button>
     </div>
@@ -628,6 +631,7 @@ async function handlePhoto(input) {
 async function extractWithGemini(b64, mimeType) {
   const geminiKey = ls('gemini_key');
   const debugEl = document.getElementById('debug-section');
+  debugEl.textContent = '';
   
   function debug(msg) {
     console.log(msg);
@@ -650,51 +654,44 @@ async function extractWithGemini(b64, mimeType) {
   debug('🔑 Key found: ' + geminiKey.substring(0, 10) + '...');
   
   try {
-    debug('🔄 Sending to Gemini...');
+    debug('🔄 Initializing Gemini...');
     
-    const res = await fetch(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + geminiKey,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [
-            { inline_data: { mime_type: mimeType, data: b64 } },
-            { text: 'Extract bill information. Return ONLY valid JSON: {"type":"electricity|water|wifi|other","amount":0.00,"consumption":"","period":"","provider":"","raw_text":""}' }
-          ]}],
-          generationConfig: { temperature: 0.1, maxOutputTokens: 1000 }
-        })
-      }
-    );
+    // Use the official Google Generative AI library
+    const { GoogleGenerativeAI } = window;
+    const genAI = new GoogleGenerativeAI(geminiKey);
+    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
     
-    if (!res.ok) {
-      debug('❌ HTTP Error: ' + res.status);
-      if (res.status === 404) {
-        debug('API key might be invalid or missing');
-        debug('Check Settings → Gemini API Key');
-      } else if (res.status === 403) {
-        debug('API key not authorized');
-      } else if (res.status === 400) {
-        debug('Invalid request format');
-      }
-      showExtractionError('⚠ API error ' + res.status + ' - check Settings');
-      return;
+    debug('✓ Connected to Gemini');
+    debug('🔄 Sending image...');
+    
+    // Convert base64 to binary data
+    const binaryString = atob(b64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
     }
     
-    const data = await res.json();
+    // Prepare image data
+    const imagePart = {
+      inlineData: {
+        data: b64,
+        mimeType: mimeType
+      }
+    };
+    
+    // Call Gemini API
+    const result = await model.generateContent([
+      'Extract bill information. Return ONLY valid JSON: {"type":"electricity|water|wifi|other","amount":0.00,"consumption":"","period":"","provider":"","raw_text":""}',
+      imagePart
+    ]);
+    
     debug('✓ Got response from Gemini');
     
-    if (data.error) {
-      debug('❌ API Error: ' + data.error.message);
-      showExtractionError('⚠ API error: ' + data.error.message);
-      return;
-    }
-    
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    debug('📝 Gemini returned: ' + text.substring(0, 200) + (text.length > 200 ? '...' : ''));
+    const text = result.response.text();
+    debug('📝 Response: ' + text.substring(0, 150) + (text.length > 150 ? '...' : ''));
     
     if (!text) {
-      debug('❌ No text in response');
+      debug('❌ Empty response from Gemini');
       showExtractionError('⚠ No response from Gemini');
       return;
     }
@@ -714,7 +711,7 @@ async function extractWithGemini(b64, mimeType) {
       }
     } else {
       debug('❌ No JSON in response');
-      showExtractionError('⚠ Could not find JSON in response');
+      showExtractionError('⚠ Could not find JSON');
       return;
     }
     
@@ -754,7 +751,10 @@ async function extractWithGemini(b64, mimeType) {
     document.getElementById('extract-result-msg').textContent = '✓ Gemini extracted details — review and confirm';
     
   } catch (e) {
-    debug('❌ Exception: ' + e.message);
+    debug('❌ Error: ' + e.message);
+    if (e.message.includes('API key')) {
+      debug('❌ API Key issue - check Settings');
+    }
     showExtractionError('⚠ Error: ' + e.message);
   }
   
@@ -766,6 +766,87 @@ function showExtractionError(msg) {
   document.getElementById('extract-result-msg').textContent = msg;
   document.getElementById('extracting-status').style.display = 'none';
   document.getElementById('extracted-data').style.display = 'block';
+}
+
+async function testGeminiKey() {
+  // Try to get key from either settings or setup form
+  let geminiKey = document.getElementById('cfg-gemini-key')?.value || 
+                  document.getElementById('gemini-key')?.value ||
+                  ls('gemini_key');
+  
+  const debugEl = document.getElementById('debug-section');
+  debugEl.textContent = '';
+  debugEl.style.display = 'block';
+  
+  function debug(msg) {
+    console.log(msg);
+    debugEl.textContent += (debugEl.textContent ? '\n' : '') + msg;
+  }
+  
+  if (!geminiKey || geminiKey.trim() === '') {
+    debug('❌ No API key entered!');
+    debug('Paste your key from aistudio.google.com');
+    return;
+  }
+  
+  geminiKey = geminiKey.trim();
+  debug('🔧 Testing Gemini API Key...');
+  debug('Key: ' + geminiKey.substring(0, 15) + '...');
+  debug('');
+  
+  try {
+    debug('📡 Sending test request...');
+    const res = await fetch(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=' + encodeURIComponent(geminiKey),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: 'Say "OK"' }] }],
+          generationConfig: { maxOutputTokens: 10 }
+        })
+      }
+    );
+    
+    debug('Response status: ' + res.status);
+    
+    if (!res.ok) {
+      debug('');
+      debug('❌ HTTP Error ' + res.status);
+      debug('');
+      if (res.status === 404) {
+        debug('The API key is invalid or the');
+        debug('Generative Language API is not');
+        debug('enabled in your Google Cloud project.');
+        debug('');
+        debug('Try creating a new key at:');
+        debug('aistudio.google.com');
+      } else if (res.status === 403) {
+        debug('API key not authorized');
+      } else if (res.status === 400) {
+        debug('Invalid request');
+      }
+      return;
+    }
+    
+    const data = await res.json();
+    
+    if (data.error) {
+      debug('❌ API Error: ' + data.error.message);
+      return;
+    }
+    
+    const response = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response';
+    debug('✅ SUCCESS!');
+    debug('');
+    debug('API returned: ' + response);
+    debug('');
+    debug('✓ Your key is valid!');
+    debug('✓ Bill extraction will work');
+    
+  } catch (e) {
+    debug('❌ Error: ' + e.message);
+  }
 }
 
 function showManualForm() {
