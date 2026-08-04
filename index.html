@@ -646,20 +646,22 @@ async function extractWithGemini(b64, mimeType) {
     return;
   }
   
-  debug('🔑 Key: ' + geminiKey.substring(0, 10) + '...');
+  debug('🔑 Key: ' + geminiKey.substring(0, 15) + '...');
   
   try {
-    debug('🔄 Loading Gemini...');
+    debug('🔄 Loading Gemini library...');
     const { GoogleGenerativeAI } = await import('https://esm.run/@google/generative-ai');
     debug('✓ Loaded');
     
     const genAI = new GoogleGenerativeAI(geminiKey);
     
-    // Try models from newest to oldest
+    // Try models - prioritize ones that work best
     const models = [
       'gemini-2.0-flash-exp',
       'gemini-2.0-flash',
+      'gemini-1.5-pro-vision',
       'gemini-1.5-pro',
+      'gemini-1.5-flash-8b',
       'gemini-1.5-flash',
       'gemini-pro-vision',
       'gemini-pro'
@@ -672,24 +674,31 @@ async function extractWithGemini(b64, mimeType) {
       debug('  Trying: ' + m);
       try {
         model = genAI.getGenerativeModel({ model: m });
-        // Quick test to see if model works
-        const testResult = await Promise.race([
-          model.generateContent('test'),
-          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000))
-        ]);
         usedModel = m;
-        debug('✓ Using: ' + m);
+        debug('✓ Model initialized: ' + m);
+        
+        // Try to actually use the model
+        debug('  Testing model...');
+        const testResult = await model.generateContent('test');
+        debug('✓ Model works: ' + m);
         break;
       } catch (e) {
-        debug('  ✗ ' + m + ' unavailable');
+        debug('  ✗ ' + m + ': ' + e.message.substring(0, 50));
+        model = null;
         continue;
       }
     }
     
-    if (!usedModel) {
-      debug('❌ No models available for your key');
-      debug('📝 Please fill in details manually below');
-      document.getElementById('extract-result-msg').textContent = '📝 AI unavailable - enter manually';
+    if (!model || !usedModel) {
+      debug('');
+      debug('❌ No models available');
+      debug('This might mean:');
+      debug('1. Generative AI API not enabled');
+      debug('2. Account needs setup at aistudio.google.com');
+      debug('3. Try creating a NEW key at aistudio.google.com');
+      debug('');
+      debug('📝 Fill in details manually below');
+      document.getElementById('extract-result-msg').textContent = '📝 No models - enter manually';
       document.getElementById('extracting-status').style.display = 'none';
       document.getElementById('extracted-data').style.display = 'block';
       return;
@@ -698,7 +707,7 @@ async function extractWithGemini(b64, mimeType) {
     debug('🔄 Sending image to ' + usedModel + '...');
     
     const result = await model.generateContent([
-      'Extract bill information and return ONLY valid JSON: {"type":"electricity|water|wifi|other","amount":0.00,"consumption":"","period":"","provider":"","raw_text":""}',
+      'Extract bill information. Return ONLY valid JSON: {"type":"electricity|water|wifi|other","amount":0.00,"consumption":"","period":"","provider":"","raw_text":""}',
       {
         inlineData: {
           data: b64,
@@ -712,24 +721,31 @@ async function extractWithGemini(b64, mimeType) {
     const text = result.response.text();
     if (!text) {
       debug('❌ Empty response');
-      showExtractionError('⚠ Empty response - fill manually');
+      document.getElementById('extract-result-msg').textContent = '⚠ No response - enter manually';
+      document.getElementById('extracting-status').style.display = 'none';
+      document.getElementById('extracted-data').style.display = 'block';
       return;
     }
     
-    debug('📝 Extracting data...');
+    debug('📝 Parsing data...');
     const match = text.match(/\{[\s\S]*\}/);
     if (!match) {
-      debug('❌ No JSON found');
-      showExtractionError('⚠ Could not parse - fill manually');
+      debug('❌ No JSON found in response');
+      document.getElementById('extract-result-msg').textContent = '⚠ Could not parse - enter manually';
+      document.getElementById('extracting-status').style.display = 'none';
+      document.getElementById('extracted-data').style.display = 'block';
       return;
     }
     
     let info;
     try {
       info = JSON.parse(match[0]);
+      debug('✓ Parsed successfully');
     } catch (e) {
-      debug('❌ JSON parse error');
-      showExtractionError('⚠ Parse error - fill manually');
+      debug('❌ JSON parse error: ' + e.message);
+      document.getElementById('extract-result-msg').textContent = '⚠ Parse error - enter manually';
+      document.getElementById('extracting-status').style.display = 'none';
+      document.getElementById('extracted-data').style.display = 'block';
       return;
     }
     
@@ -746,21 +762,15 @@ async function extractWithGemini(b64, mimeType) {
     if (info.provider) document.getElementById('bill-notes').value = String(info.provider).trim();
     if (info.raw_text) document.getElementById('bill-text').value = String(info.raw_text).trim();
     
-    debug('✅ Extracted - review and confirm!');
-    document.getElementById('extract-result-msg').textContent = '✓ Details extracted - review!';
+    debug('✅ Extraction complete!');
+    document.getElementById('extract-result-msg').textContent = '✓ Details extracted!';
     
   } catch (e) {
-    debug('⚠ AI failed: ' + e.message);
+    debug('⚠ Error: ' + e.message);
     debug('📝 Fill in details manually below');
-    document.getElementById('extract-result-msg').textContent = '📝 AI unavailable - enter manually';
+    document.getElementById('extract-result-msg').textContent = '📝 AI error - enter manually';
   }
   
-  document.getElementById('extracting-status').style.display = 'none';
-  document.getElementById('extracted-data').style.display = 'block';
-}
-
-function showExtractionError(msg) {
-  document.getElementById('extract-result-msg').textContent = msg;
   document.getElementById('extracting-status').style.display = 'none';
   document.getElementById('extracted-data').style.display = 'block';
 }
