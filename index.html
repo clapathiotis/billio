@@ -639,53 +639,66 @@ async function extractWithGemini(b64, mimeType) {
   }
   
   if (!geminiKey || geminiKey.trim() === '') {
-    debug('❌ NO GEMINI API KEY SET');
-    showExtractionError('❌ No Gemini key — add one in Settings');
+    debug('📝 No API key - fill in details manually below');
+    document.getElementById('extract-result-msg').textContent = '📝 Fill in details manually (no AI key)';
+    document.getElementById('extracting-status').style.display = 'none';
+    document.getElementById('extracted-data').style.display = 'block';
     return;
   }
   
-  debug('🔑 Key found: ' + geminiKey.substring(0, 10) + '...');
-  
-  if (!geminiKey.startsWith('AIza')) {
-    debug('❌ Invalid key format - should start with AIza');
-    showExtractionError('❌ Invalid API key - get from aistudio.google.com');
-    return;
-  }
+  debug('🔑 Key: ' + geminiKey.substring(0, 10) + '...');
   
   try {
-    debug('🔄 Loading Gemini library...');
+    debug('🔄 Loading Gemini...');
     const { GoogleGenerativeAI } = await import('https://esm.run/@google/generative-ai');
-    debug('✓ Library loaded');
+    debug('✓ Loaded');
     
     const genAI = new GoogleGenerativeAI(geminiKey);
     
-    // Try different models - some are more available on free tier
-    const modelsToTry = ['gemini-pro-vision', 'gemini-1.5-flash', 'gemini-pro'];
+    // Try models from newest to oldest
+    const models = [
+      'gemini-2.0-flash-exp',
+      'gemini-2.0-flash',
+      'gemini-1.5-pro',
+      'gemini-1.5-flash',
+      'gemini-pro-vision',
+      'gemini-pro'
+    ];
+    
     let model = null;
     let usedModel = null;
     
-    for (const modelName of modelsToTry) {
-      debug('🔄 Trying model: ' + modelName);
+    for (const m of models) {
+      debug('  Trying: ' + m);
       try {
-        model = genAI.getGenerativeModel({ model: modelName });
-        usedModel = modelName;
-        debug('✓ Using model: ' + modelName);
+        model = genAI.getGenerativeModel({ model: m });
+        // Quick test to see if model works
+        const testResult = await Promise.race([
+          model.generateContent('test'),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 3000))
+        ]);
+        usedModel = m;
+        debug('✓ Using: ' + m);
         break;
       } catch (e) {
-        debug('  ✗ ' + modelName + ' not available');
+        debug('  ✗ ' + m + ' unavailable');
+        continue;
       }
     }
     
-    if (!model) {
-      debug('❌ No supported models found');
-      showExtractionError('⚠ No models available - check API key');
+    if (!usedModel) {
+      debug('❌ No models available for your key');
+      debug('📝 Please fill in details manually below');
+      document.getElementById('extract-result-msg').textContent = '📝 AI unavailable - enter manually';
+      document.getElementById('extracting-status').style.display = 'none';
+      document.getElementById('extracted-data').style.display = 'block';
       return;
     }
     
-    debug('🔄 Sending image...');
+    debug('🔄 Sending image to ' + usedModel + '...');
     
     const result = await model.generateContent([
-      'Extract bill information. Return ONLY valid JSON: {"type":"electricity|water|wifi|other","amount":0.00,"consumption":"","period":"","provider":"","raw_text":""}',
+      'Extract bill information and return ONLY valid JSON: {"type":"electricity|water|wifi|other","amount":0.00,"consumption":"","period":"","provider":"","raw_text":""}',
       {
         inlineData: {
           data: b64,
@@ -697,66 +710,49 @@ async function extractWithGemini(b64, mimeType) {
     debug('✓ Got response');
     
     const text = result.response.text();
-    debug('📝 Response: ' + text.substring(0, 100) + '...');
-    
     if (!text) {
       debug('❌ Empty response');
-      showExtractionError('⚠ No response from Gemini');
+      showExtractionError('⚠ Empty response - fill manually');
       return;
     }
     
+    debug('📝 Extracting data...');
     const match = text.match(/\{[\s\S]*\}/);
     if (!match) {
       debug('❌ No JSON found');
-      showExtractionError('⚠ Could not find JSON');
+      showExtractionError('⚠ Could not parse - fill manually');
       return;
     }
     
     let info;
     try {
       info = JSON.parse(match[0]);
-      debug('✓ Parsed: type=' + info.type + ', amount=' + info.amount);
     } catch (e) {
-      debug('❌ JSON parse failed');
-      showExtractionError('⚠ Could not parse');
+      debug('❌ JSON parse error');
+      showExtractionError('⚠ Parse error - fill manually');
       return;
     }
     
-    debug('📋 Filling form...');
+    // Populate form
     if (info.type && ['electricity', 'water', 'wifi', 'other'].includes(info.type)) {
       document.getElementById('bill-type').value = info.type;
-      debug('  ✓ Type: ' + info.type);
     }
     if (info.amount) {
       const amt = parseFloat(info.amount);
-      if (!isNaN(amt)) {
-        document.getElementById('bill-amount').value = amt.toFixed(2);
-        debug('  ✓ Amount: €' + amt.toFixed(2));
-      }
+      if (!isNaN(amt)) document.getElementById('bill-amount').value = amt.toFixed(2);
     }
-    if (info.consumption) {
-      document.getElementById('bill-consumption').value = String(info.consumption).trim();
-      debug('  ✓ Consumption: ' + info.consumption);
-    }
-    if (info.period) {
-      document.getElementById('bill-period').value = String(info.period).trim();
-      debug('  ✓ Period: ' + info.period);
-    }
-    if (info.provider) {
-      document.getElementById('bill-notes').value = String(info.provider).trim();
-      debug('  ✓ Provider: ' + info.provider);
-    }
-    if (info.raw_text) {
-      document.getElementById('bill-text').value = String(info.raw_text).trim();
-      debug('  ✓ Text extracted');
-    }
+    if (info.consumption) document.getElementById('bill-consumption').value = String(info.consumption).trim();
+    if (info.period) document.getElementById('bill-period').value = String(info.period).trim();
+    if (info.provider) document.getElementById('bill-notes').value = String(info.provider).trim();
+    if (info.raw_text) document.getElementById('bill-text').value = String(info.raw_text).trim();
     
-    debug('✅ DONE - Review and save!');
-    document.getElementById('extract-result-msg').textContent = '✓ Bill details extracted!';
+    debug('✅ Extracted - review and confirm!');
+    document.getElementById('extract-result-msg').textContent = '✓ Details extracted - review!';
     
   } catch (e) {
-    debug('❌ Error: ' + e.message);
-    showExtractionError('⚠ ' + e.message);
+    debug('⚠ AI failed: ' + e.message);
+    debug('📝 Fill in details manually below');
+    document.getElementById('extract-result-msg').textContent = '📝 AI unavailable - enter manually';
   }
   
   document.getElementById('extracting-status').style.display = 'none';
