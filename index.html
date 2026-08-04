@@ -708,6 +708,52 @@ function initApp() {
   // Load bills and household members from Supabase (cross-device persistence)
   loadBillsFromSupabase();
   loadMembersFromSupabase();
+  ensureHouseholdInSupabase();
+}
+
+async function ensureHouseholdInSupabase() {
+  const url = ls('sb_url'), key = ls('sb_key');
+  const household = state.household;
+  const user = state.user;
+  if (!url || !key || !household || !user) return;
+  try {
+    // Check if this household already exists in Supabase
+    const checkRes = await fetch(url + '/rest/v1/households?code=eq.' + encodeURIComponent(household.code), {
+      method: 'GET',
+      headers: { 'apikey': key, 'Authorization': 'Bearer ' + key }
+    });
+    if (!checkRes.ok) return;
+    const existing = await checkRes.json();
+
+    if (existing.length === 0) {
+      // Household created before Supabase was set up (or before this fix) - backfill it now
+      console.log('Backfilling household to Supabase:', household.code);
+      await fetch(url + '/rest/v1/households', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': key, 'Authorization': 'Bearer ' + key, 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ name: household.name, code: household.code })
+      });
+    }
+
+    // Make sure the current user is registered as a member (in case they were only local)
+    const memberCheckRes = await fetch(url + '/rest/v1/members?household_code=eq.' + encodeURIComponent(household.code) + '&user_name=eq.' + encodeURIComponent(user.name), {
+      method: 'GET',
+      headers: { 'apikey': key, 'Authorization': 'Bearer ' + key }
+    });
+    if (memberCheckRes.ok) {
+      const existingMembers = await memberCheckRes.json();
+      if (existingMembers.length === 0) {
+        await fetch(url + '/rest/v1/members', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'apikey': key, 'Authorization': 'Bearer ' + key, 'Prefer': 'return=minimal' },
+          body: JSON.stringify({ user_name: user.name, household_code: household.code })
+        });
+        loadMembersFromSupabase();
+      }
+    }
+  } catch (e) {
+    console.log('Household backfill check failed:', e.message);
+  }
 }
 
 async function loadMembersFromSupabase() {
