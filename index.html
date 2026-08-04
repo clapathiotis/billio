@@ -222,17 +222,35 @@
     <div class="setup-step" id="step-config">
       <div class="progress-dots"><div class="dot"></div><div class="dot"></div><div class="dot active"></div></div>
       <div class="setup-title" style="margin-bottom:8px">Your profile</div>
-      <div class="setup-sub" style="margin-bottom:20px">Set your name and household</div>
+      <div class="setup-sub" style="margin-bottom:20px">Set your name, then create or join a household</div>
       <div style="width:100%;max-width:380px">
         <div class="form-group">
           <label class="form-label">Your name</label>
           <input class="form-input" id="setup-name" placeholder="e.g. Alex" autocomplete="given-name">
         </div>
-        <div class="form-group">
-          <label class="form-label">Household name</label>
-          <input class="form-input" id="setup-household" placeholder="e.g. Apartment 4B">
+
+        <div style="display:flex;gap:8px;margin-bottom:16px">
+          <button class="btn btn-full" id="tab-create" onclick="showHouseholdTab('create')" style="background:var(--accent);color:#fff">Create New</button>
+          <button class="btn btn-full" id="tab-join" onclick="showHouseholdTab('join')" style="background:var(--bg3);color:var(--text2)">Join Existing</button>
         </div>
-        <button class="btn btn-primary btn-full" onclick="finishSetup()">Create Household →</button>
+
+        <div id="household-tab-create">
+          <div class="form-group">
+            <label class="form-label">Household name</label>
+            <input class="form-input" id="setup-household" placeholder="e.g. Apartment 4B">
+          </div>
+          <button class="btn btn-primary btn-full" onclick="finishSetup()">Create Household →</button>
+        </div>
+
+        <div id="household-tab-join" style="display:none">
+          <div class="form-group">
+            <label class="form-label">Invite code</label>
+            <input class="form-input" id="setup-join-code" placeholder="e.g. XN3T4K" style="text-transform:uppercase;letter-spacing:0.15em;font-family:var(--mono)" maxlength="8">
+          </div>
+          <div class="alert alert-info" id="join-status" style="display:none;margin-bottom:16px"></div>
+          <button class="btn btn-primary btn-full" onclick="joinHouseholdFromSetup()">Join Household →</button>
+        </div>
+
         <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="showStep('step-welcome')">← Back</button>
       </div>
     </div>
@@ -515,14 +533,125 @@ function saveGemini() {
   showStep('step-config');
 }
 
-function finishSetup() {
+function showHouseholdTab(tab) {
+  const createTab = document.getElementById('household-tab-create');
+  const joinTab = document.getElementById('household-tab-join');
+  const btnCreate = document.getElementById('tab-create');
+  const btnJoin = document.getElementById('tab-join');
+  if (tab === 'create') {
+    createTab.style.display = 'block';
+    joinTab.style.display = 'none';
+    btnCreate.style.background = 'var(--accent)'; btnCreate.style.color = '#fff';
+    btnJoin.style.background = 'var(--bg3)'; btnJoin.style.color = 'var(--text2)';
+  } else {
+    createTab.style.display = 'none';
+    joinTab.style.display = 'block';
+    btnJoin.style.background = 'var(--accent)'; btnJoin.style.color = '#fff';
+    btnCreate.style.background = 'var(--bg3)'; btnCreate.style.color = 'var(--text2)';
+  }
+}
+
+async function finishSetup() {
   const name = document.getElementById('setup-name').value.trim() || 'You';
   const hname = document.getElementById('setup-household').value.trim() || 'My Household';
   const user = { name, id: 'user_' + Date.now() };
-  const household = { name: hname, code: genCode(), members: [{ ...user, role: 'owner' }], created: Date.now() };
+  const code = genCode();
+  const household = { name: hname, code, members: [{ ...user, role: 'owner' }], created: Date.now() };
+
+  const url = ls('sb_url'), key = ls('sb_key');
+  if (url && key) {
+    try {
+      const res = await fetch(url + '/rest/v1/households', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': key, 'Authorization': 'Bearer ' + key, 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ name: hname, code: code })
+      });
+      if (!res.ok) console.warn('Household save to Supabase failed:', res.status);
+
+      await fetch(url + '/rest/v1/members', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': key, 'Authorization': 'Bearer ' + key, 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ user_name: name, household_code: code })
+      });
+    } catch (e) {
+      console.warn('Supabase household sync failed:', e);
+    }
+  }
+
   ls('billio_user', user); ls('billio_household', household); ls('billio_bills', []);
   state.user = user; state.household = household; state.bills = [];
   initApp();
+}
+
+async function joinHouseholdFromSetup() {
+  const name = document.getElementById('setup-name').value.trim() || 'You';
+  const codeInput = document.getElementById('setup-join-code');
+  const code = codeInput.value.trim().toUpperCase();
+  const statusEl = document.getElementById('join-status');
+
+  statusEl.style.display = 'block';
+  statusEl.textContent = '🔄 Looking up household...';
+
+  if (!code) { statusEl.textContent = '⚠ Enter an invite code'; return; }
+
+  const url = ls('sb_url'), key = ls('sb_key');
+  if (!url || !key) {
+    statusEl.textContent = '⚠ Set up Supabase first (Full Setup) to join a household';
+    return;
+  }
+
+  try {
+    const res = await fetch(url + '/rest/v1/households?code=eq.' + encodeURIComponent(code), {
+      method: 'GET',
+      headers: { 'apikey': key, 'Authorization': 'Bearer ' + key }
+    });
+
+    if (!res.ok) {
+      statusEl.textContent = '⚠ Error looking up household (HTTP ' + res.status + ')';
+      return;
+    }
+
+    const results = await res.json();
+    if (!results || results.length === 0) {
+      statusEl.textContent = '❌ No household found with code "' + code + '". Check the code and try again.';
+      return;
+    }
+
+    const householdRow = results[0];
+    const user = { name, id: 'user_' + Date.now() };
+
+    // Add this user as a member in Supabase
+    await fetch(url + '/rest/v1/members', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': key, 'Authorization': 'Bearer ' + key, 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ user_name: name, household_code: householdRow.code })
+    });
+
+    // Fetch all members of this household so everyone sees the full roster
+    let members = [{ ...user, role: 'member' }];
+    try {
+      const membersRes = await fetch(url + '/rest/v1/members?household_code=eq.' + encodeURIComponent(householdRow.code), {
+        method: 'GET',
+        headers: { 'apikey': key, 'Authorization': 'Bearer ' + key }
+      });
+      if (membersRes.ok) {
+        const memberRows = await membersRes.json();
+        members = memberRows.map(m => ({ name: m.user_name, id: m.id, role: 'member' }));
+      }
+    } catch (e) { /* fall back to just this user */ }
+
+    const household = { name: householdRow.name, code: householdRow.code, members, created: Date.parse(householdRow.created_at) || Date.now() };
+
+    statusEl.textContent = '✅ Joined "' + householdRow.name + '"!';
+
+    ls('billio_user', user); ls('billio_household', household); ls('billio_bills', []);
+    state.user = user; state.household = household; state.bills = [];
+
+    setTimeout(() => initApp(), 600);
+
+  } catch (e) {
+    statusEl.textContent = '⚠ Error: ' + e.message;
+  }
 }
 
 async function loadBillsFromSupabase() {
@@ -576,8 +705,34 @@ function initApp() {
   document.getElementById('household-member-count').textContent = mc + ' member' + (mc !== 1 ? 's' : '');
   renderMembers(); renderDashboard(); renderBills();
   
-  // Load bills from Supabase (cross-device persistence)
+  // Load bills and household members from Supabase (cross-device persistence)
   loadBillsFromSupabase();
+  loadMembersFromSupabase();
+}
+
+async function loadMembersFromSupabase() {
+  const url = ls('sb_url'), key = ls('sb_key');
+  const code = state.household?.code;
+  if (!url || !key || !code) return;
+  try {
+    const res = await fetch(url + '/rest/v1/members?household_code=eq.' + encodeURIComponent(code), {
+      method: 'GET',
+      headers: { 'apikey': key, 'Authorization': 'Bearer ' + key }
+    });
+    if (res.ok) {
+      const memberRows = await res.json();
+      if (memberRows.length > 0) {
+        const members = memberRows.map(m => ({ name: m.user_name, id: m.id, role: 'member' }));
+        state.household.members = members;
+        ls('billio_household', state.household);
+        const mc = members.length;
+        document.getElementById('household-member-count').textContent = mc + ' member' + (mc !== 1 ? 's' : '');
+        renderMembers();
+      }
+    }
+  } catch (e) {
+    console.log('Could not refresh members from Supabase');
+  }
 }
 
 function showScreen(name) {
@@ -1033,10 +1188,68 @@ function copyCode() {
   navigator.clipboard?.writeText(code).then(() => alert('Copied: ' + code)).catch(() => alert('Your code: ' + code));
 }
 
-function joinHousehold() {
-  const code = document.getElementById('join-code').value.trim().toUpperCase();
+async function joinHousehold() {
+  const codeInput = document.getElementById('join-code');
+  const code = codeInput.value.trim().toUpperCase();
   if (code.length < 4) { alert('Enter a valid invite code'); return; }
-  alert('With Supabase connected, this would join household: ' + code + '\n\nSet up Supabase to enable cross-device household sharing!');
+
+  const url = ls('sb_url'), key = ls('sb_key');
+  if (!url || !key) {
+    alert('Set up Supabase in Settings first to enable joining households across devices.');
+    return;
+  }
+
+  try {
+    const res = await fetch(url + '/rest/v1/households?code=eq.' + encodeURIComponent(code), {
+      method: 'GET',
+      headers: { 'apikey': key, 'Authorization': 'Bearer ' + key }
+    });
+
+    if (!res.ok) { alert('Error looking up household (HTTP ' + res.status + ')'); return; }
+
+    const results = await res.json();
+    if (!results || results.length === 0) {
+      alert('No household found with code "' + code + '". Check the code and try again.');
+      return;
+    }
+
+    const householdRow = results[0];
+    const name = state.user?.name || 'You';
+
+    if (!confirm('Join "' + householdRow.name + '"? This will switch you away from your current household.')) return;
+
+    // Add this user as a member in Supabase
+    await fetch(url + '/rest/v1/members', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': key, 'Authorization': 'Bearer ' + key, 'Prefer': 'return=minimal' },
+      body: JSON.stringify({ user_name: name, household_code: householdRow.code })
+    });
+
+    // Fetch full member roster
+    let members = [{ name, role: 'member' }];
+    try {
+      const membersRes = await fetch(url + '/rest/v1/members?household_code=eq.' + encodeURIComponent(householdRow.code), {
+        method: 'GET',
+        headers: { 'apikey': key, 'Authorization': 'Bearer ' + key }
+      });
+      if (membersRes.ok) {
+        const memberRows = await membersRes.json();
+        members = memberRows.map(m => ({ name: m.user_name, id: m.id, role: 'member' }));
+      }
+    } catch (e) { /* fall back to just this user */ }
+
+    const household = { name: householdRow.name, code: householdRow.code, members, created: Date.parse(householdRow.created_at) || Date.now() };
+
+    ls('billio_household', household); ls('billio_bills', []);
+    state.household = household; state.bills = [];
+
+    alert('✅ Joined "' + householdRow.name + '"!');
+    codeInput.value = '';
+    initApp();
+
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
 }
 
 function showSettingsModal() {
