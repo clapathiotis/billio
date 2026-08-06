@@ -199,18 +199,18 @@
 
     <div class="setup-step" id="step-gemini">
       <div class="progress-dots"><div class="dot"></div><div class="dot active"></div><div class="dot"></div></div>
-      <div class="setup-title" style="margin-bottom:8px">Gemini AI Key</div>
+      <div class="setup-title" style="margin-bottom:8px">Groq AI Key</div>
       <div class="setup-sub" style="margin-bottom:4px">For free bill photo scanning</div>
-      <div class="gemini-badge" style="margin-bottom:20px">✦ 1,500 free scans per day</div>
+      <div class="gemini-badge" style="margin-bottom:20px">✦ Free, fast vision AI</div>
       <div style="width:100%;max-width:380px">
         <div class="alert alert-info" style="margin-bottom:16px">
-          1. Go to <strong>aistudio.google.com</strong><br>
-          2. Sign in with Google<br>
-          3. Get API Key → Create API Key → Copy it
+          1. Go to <strong>console.groq.com</strong><br>
+          2. Sign in (Google login works)<br>
+          3. API Keys → Create API Key → Copy it
         </div>
         <div class="form-group">
-          <label class="form-label">Gemini API Key</label>
-          <input class="form-input" id="gemini-key" placeholder="AIzaSy...">
+          <label class="form-label">Groq API Key</label>
+          <input class="form-input" id="gemini-key" placeholder="gsk_...">
         </div>
         <button class="btn btn-ghost btn-full" style="margin-bottom:8px" onclick="testGeminiKey()">🧪 Test Key (optional)</button>
         <div id="debug-section" style="display:none;background:var(--bg3);border-radius:12px;padding:12px;margin-bottom:12px;font-size:12px;color:var(--text2);max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;font-family:var(--mono)"></div>
@@ -314,7 +314,7 @@
           <div class="card" style="margin-bottom:14px">
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
               <div class="card-title" style="margin-bottom:0">Add Bill</div>
-              <div class="gemini-badge">✦ Gemini AI</div>
+              <div class="gemini-badge">✦ Groq AI</div>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px" id="uploadZone">
               <button class="btn btn-primary btn-full" onclick="document.getElementById('photoInputCamera').click()" style="background:var(--accent2)">
@@ -330,10 +330,10 @@
           </div>
 
           <div id="extracting-status" style="display:none" class="alert alert-info">
-            <div style="display:flex;align-items:center;gap:10px"><div class="spinner"></div> Gemini is reading your bill...</div>
+            <div style="display:flex;align-items:center;gap:10px"><div class="spinner"></div> Groq AI is reading your bill...</div>
           </div>
           <div id="no-key-warning" style="display:none" class="alert alert-warn">
-            No Gemini key set — fill in details manually, or add your key in Settings.
+            No Groq key set — fill in details manually, or add your key in Settings.
           </div>
 
           <div id="extracted-data" style="display:none">
@@ -470,11 +470,11 @@
         </div>
       </div>
       <div style="background:var(--bg3);border-radius:12px;padding:14px;margin-bottom:16px">
-        <div style="font-size:13px;font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:8px">✦ Gemini AI <div class="gemini-badge">free</div></div>
-        <div style="font-size:12px;color:var(--text2);margin-bottom:12px">Get free key at aistudio.google.com</div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:8px">✦ Groq AI <div class="gemini-badge">free</div></div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:12px">Get free key at console.groq.com</div>
         <div class="form-group">
-          <label class="form-label">Gemini API Key</label>
-          <input class="form-input" id="cfg-gemini-key" placeholder="AIzaSy...">
+          <label class="form-label">Groq API Key</label>
+          <input class="form-input" id="cfg-gemini-key" placeholder="gsk_...">
         </div>
         <button class="btn btn-ghost btn-full" onclick="testGeminiKey()" style="margin-bottom:0">🧪 Test Key</button>
         <div id="settings-debug-section" style="display:none;background:var(--bg1);border-radius:12px;padding:12px;margin-top:12px;font-size:12px;color:var(--text2);max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;font-family:var(--mono)"></div>
@@ -857,7 +857,7 @@ async function handlePhoto(input) {
 }
 
 async function extractWithGemini(b64, mimeType) {
-  const geminiKey = ls('gemini_key');
+  const groqKey = ls('gemini_key');
   const debugEl = document.getElementById('debug-section');
   debugEl.textContent = '';
   
@@ -867,7 +867,7 @@ async function extractWithGemini(b64, mimeType) {
     debugEl.style.display = 'block';
   }
   
-  if (!geminiKey || geminiKey.trim() === '') {
+  if (!groqKey || groqKey.trim() === '') {
     debug('📝 No API key - fill in details manually below');
     document.getElementById('extract-result-msg').textContent = '📝 Fill in details manually (no AI key)';
     document.getElementById('extracting-status').style.display = 'none';
@@ -875,73 +875,62 @@ async function extractWithGemini(b64, mimeType) {
     return;
   }
   
-  debug('🔑 Key: ' + geminiKey.substring(0, 15) + '...');
+  debug('🔑 Key: ' + groqKey.substring(0, 12) + '...');
+  debug('  Trying: meta-llama/llama-4-scout-17b-16e-instruct');
   
-  // Try models with direct fetch + x-goog-api-key header (works with new AQ. keys)
-  const models = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro'];
   let text = null;
-  let usedModel = null;
   let lastError = null;
   
-  for (const m of models) {
-    debug('  Trying: ' + m);
-    try {
-      const res = await fetch(
-        'https://generativelanguage.googleapis.com/v1beta/models/' + m + ':generateContent',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': geminiKey
-          },
-          body: JSON.stringify({
-            contents: [{ parts: [
-              { inline_data: { mime_type: mimeType, data: b64 } },
-              { text: 'Extract bill information. Return ONLY valid JSON: {"type":"electricity|water|wifi|other","amount":0.00,"consumption":"","period":"","provider":"","raw_text":""}' }
-            ]}],
-            generationConfig: { temperature: 0.1, maxOutputTokens: 1000 }
-          })
-        }
-      );
-      
-      if (!res.ok) {
-        const errBody = await res.text();
-        debug('  ✗ ' + m + ': HTTP ' + res.status);
-        lastError = 'HTTP ' + res.status + ' on ' + m;
-        continue;
+  try {
+    const res = await fetch(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + groqKey
+        },
+        body: JSON.stringify({
+          model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Extract bill information from this image. Return ONLY valid JSON, no markdown, no explanation: {"type":"electricity|water|wifi|other","amount":0.00,"consumption":"","period":"","provider":"","raw_text":""}' },
+              { type: 'image_url', image_url: { url: 'data:' + mimeType + ';base64,' + b64 } }
+            ]
+          }],
+          temperature: 0.1,
+          max_tokens: 1000
+        })
       }
-      
+    );
+    
+    if (!res.ok) {
+      const errBody = await res.text();
+      debug('  ✗ HTTP ' + res.status + ': ' + errBody.substring(0, 100));
+      lastError = 'HTTP ' + res.status;
+    } else {
       const data = await res.json();
       if (data.error) {
-        debug('  ✗ ' + m + ': ' + data.error.message.substring(0, 60));
+        debug('  ✗ ' + data.error.message.substring(0, 100));
         lastError = data.error.message;
-        continue;
+      } else {
+        text = data.choices?.[0]?.message?.content || '';
+        if (text) debug('✓ Success with Groq');
       }
-      
-      text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      if (text) {
-        usedModel = m;
-        debug('✓ Success with: ' + m);
-        break;
-      }
-    } catch (e) {
-      debug('  ✗ ' + m + ': ' + e.message.substring(0, 60));
-      lastError = e.message;
-      continue;
     }
+  } catch (e) {
+    debug('  ✗ ' + e.message.substring(0, 100));
+    lastError = e.message;
   }
   
-  if (!usedModel || !text) {
+  if (!text) {
     debug('');
-    debug('❌ All models failed.');
+    debug('❌ Extraction failed.');
     debug('Last error: ' + (lastError || 'unknown'));
     debug('');
-    debug('This is a known Google-side issue with');
-    debug('new "AQ." format API keys affecting many');
-    debug('developers right now. Not a bug in Billio.');
-    debug('');
     debug('📝 Fill in details manually below');
-    document.getElementById('extract-result-msg').textContent = '📝 AI unavailable (Google API issue) - enter manually';
+    document.getElementById('extract-result-msg').textContent = '📝 AI unavailable - enter manually';
     document.getElementById('extracting-status').style.display = 'none';
     document.getElementById('extracted-data').style.display = 'block';
     return;
@@ -990,7 +979,7 @@ async function extractWithGemini(b64, mimeType) {
 
 async function testGeminiKey() {
   // Try to get key from either settings or setup form
-  let geminiKey = document.getElementById('cfg-gemini-key')?.value || 
+  let groqKey = document.getElementById('cfg-gemini-key')?.value || 
                   document.getElementById('gemini-key')?.value ||
                   ls('gemini_key');
   
@@ -1007,82 +996,63 @@ async function testGeminiKey() {
     debugEl.textContent += (debugEl.textContent ? '\n' : '') + msg;
   }
   
-  if (!geminiKey || geminiKey.trim() === '') {
+  if (!groqKey || groqKey.trim() === '') {
     debug('❌ No API key entered!');
-    debug('Paste your key from aistudio.google.com');
+    debug('Paste your key from console.groq.com');
     return;
   }
   
-  geminiKey = geminiKey.trim();
-  debug('🔧 Testing Gemini API Key...');
-  debug('Key: ' + geminiKey.substring(0, 15) + '...');
+  groqKey = groqKey.trim();
+  debug('🔧 Testing Groq API Key...');
+  debug('Key: ' + groqKey.substring(0, 12) + '...');
   debug('');
+  debug('📡 Testing model: meta-llama/llama-4-scout-17b-16e-instruct');
   
-  const models = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro'];
   let success = false;
   
-  for (const m of models) {
-    debug('📡 Testing model: ' + m);
-    try {
-      const res = await fetch(
-        'https://generativelanguage.googleapis.com/v1beta/models/' + m + ':generateContent',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': geminiKey
-          },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: 'Say "OK"' }] }],
-            generationConfig: { maxOutputTokens: 10 }
-          })
-        }
-      );
-      
-      if (!res.ok) {
-        debug('  ✗ HTTP ' + res.status);
-        continue;
+  try {
+    const res = await fetch(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + groqKey
+        },
+        body: JSON.stringify({
+          model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+          messages: [{ role: 'user', content: 'Say "OK"' }],
+          max_tokens: 10
+        })
       }
-      
+    );
+    
+    if (!res.ok) {
+      const errBody = await res.text();
+      debug('  ✗ HTTP ' + res.status + ': ' + errBody.substring(0, 100));
+    } else {
       const data = await res.json();
       if (data.error) {
-        debug('  ✗ ' + data.error.message.substring(0, 60));
-        continue;
+        debug('  ✗ ' + data.error.message.substring(0, 100));
+      } else {
+        const response = data.choices?.[0]?.message?.content || 'No response';
+        debug('  ✓ SUCCESS: ' + response.trim());
+        debug('');
+        debug('✅ Your key works!');
+        debug('✓ Bill extraction will work!');
+        success = true;
       }
-      
-      const response = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response';
-      debug('  ✓ SUCCESS: ' + response.trim());
-      debug('');
-      debug('✅ Your key works with: ' + m);
-      debug('✓ Bill extraction will work!');
-      success = true;
-      break;
-      
-    } catch (e) {
-      debug('  ✗ Error: ' + e.message.substring(0, 60));
     }
+  } catch (e) {
+    debug('  ✗ Error: ' + e.message.substring(0, 100));
   }
   
   if (!success) {
     debug('');
-    debug('❌ Key did not work with any model.');
+    debug('❌ Key did not work.');
     debug('');
-    if (geminiKey.startsWith('AQ.')) {
-      debug('Your key uses the new "AQ." format,');
-      debug('which Google is currently rolling out.');
-      debug('Some accounts with AQ. keys are hitting');
-      debug('a known Google-side bug (401 errors)');
-      debug('affecting many developers right now.');
-      debug('');
-      debug('This is NOT a problem with Billio —');
-      debug('it is on Google\'s end. You can:');
-      debug('1. Wait for Google to fix the rollout');
-      debug('2. Check discuss.ai.google.dev for updates');
-      debug('3. Use manual bill entry in the meantime');
-    } else {
-      debug('Try creating a new key at:');
-      debug('aistudio.google.com');
-    }
+    debug('Try creating a new key at:');
+    debug('console.groq.com (API Keys section)');
   }
 }
 
