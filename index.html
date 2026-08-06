@@ -507,14 +507,19 @@ function showStep(id) {
   
   // Auto-fill Supabase URL and key if on Supabase step
   if (id === 'step-supabase') {
+    const sbUrl = 'https://caibqlebzcjaifxzutec.supabase.co';
+    const sbKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNhaWJxbGViemNqYWlmeHp1dGVjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUzOTAwNjgsImV4cCI6MjA5MDk2NjA2OH0.w9w06RSHDxeIT538kUUFmpbQ7VnvRPaR_aCKVnrKufk';
     const urlField = document.getElementById('sb-url');
     const keyField = document.getElementById('sb-key');
     if (urlField && !urlField.value) {
-      urlField.value = 'https://caibqlebzcjaifxzutec.supabase.co';
+      urlField.value = sbUrl;
     }
     if (keyField && !keyField.value) {
-      keyField.value = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNhaWJxbGViemNqYWlmeHp1dGVjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUzOTAwNjgsImV4cCI6MjA5MDk2NjA2OH0.w9w06RSHDxeIT538kUUFmpbQ7VnvRPaR_aCKVnrKufk';
+      keyField.value = sbKey;
     }
+    // Auto-save to localStorage so bills sync immediately
+    if (!ls('sb_url')) ls('sb_url', sbUrl);
+    if (!ls('sb_key')) ls('sb_key', sbKey);
   }
 }
 
@@ -664,8 +669,12 @@ async function loadBillsFromSupabase() {
       headers: { 'apikey': key, 'Authorization': 'Bearer ' + key }
     });
     if (res.ok) {
-      const bills = await res.json();
-      state.bills = bills.map(b => ({
+      const supabaseBills = await res.json();
+      const supabaseIds = new Set(supabaseBills.map(b => b.id));
+      const localBills = state.bills || [];
+      
+      // Mark bills from Supabase as synced
+      const syncedBills = supabaseBills.map(b => ({
         id: b.id,
         type: b.type,
         amount: b.amount,
@@ -676,9 +685,26 @@ async function loadBillsFromSupabase() {
         photo: b.photo_url,
         date: b.date,
         addedBy: b.added_by,
-        household: b.household_code
+        household: b.household_code,
+        syncStatus: 'synced'
       }));
-      console.log('✓ Loaded', state.bills.length, 'bills from Supabase');
+      
+      // Keep local bills that aren't in Supabase yet (they may not have synced)
+      const unsyncedLocalBills = localBills.filter(b => !supabaseIds.has(b.id));
+      
+      // Merge: Supabase bills first, then any local-only bills
+      state.bills = [...syncedBills, ...unsyncedLocalBills];
+      
+      console.log('✓ Loaded', syncedBills.length, 'bills from Supabase,', unsyncedLocalBills.length, 'local bills');
+      
+      // Try to sync any unsynced local bills
+      unsyncedLocalBills.forEach(bill => {
+        if (!bill.syncStatus) bill.syncStatus = 'syncing';
+        syncToSupabase(bill).then(() => {
+          bill.syncStatus = 'synced';
+          renderBills();
+        });
+      });
     }
   } catch (e) {
     console.log('Could not load from Supabase (may not be configured)');
@@ -1081,11 +1107,17 @@ function saveBill() {
     photo: state.photoData,
     date: new Date().toISOString(),
     addedBy: state.user?.name || 'You',
-    household: state.household?.code
+    household: state.household?.code,
+    syncStatus: 'syncing'
   };
   state.bills.unshift(bill);
   ls('billio_bills', state.bills);
-  syncToSupabase(bill);
+  renderBills(); // Re-render to show "syncing" status
+  syncToSupabase(bill).then(() => {
+    // Update sync status after sync completes
+    state.bills.find(b => b.id === bill.id).syncStatus = 'synced';
+    renderBills();
+  });
   showScreen('bills');
 }
 
@@ -1176,7 +1208,8 @@ function billItemHTML(bill) {
   const t = BILL_TYPES[bill.type] || BILL_TYPES.other;
   const d = new Date(bill.date);
   const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
-  return `<div class="bill-item" onclick="openBill('${bill.id}')"><div class="bill-icon ${t.color}">${t.icon}</div><div class="bill-info"><div class="bill-name">${t.label}${bill.notes ? ' · ' + bill.notes : ''}</div><div class="bill-meta">${bill.period || dateStr}${bill.consumption ? ' · ' + bill.consumption : ''}</div></div><div style="text-align:right;flex-shrink:0"><div style="font-size:15px;font-weight:600;color:var(--accent)">€${(bill.amount||0).toFixed(2)}</div><div style="font-size:11px;color:var(--text3);margin-top:2px">${bill.addedBy || ''}</div></div></div>`;
+  const syncBadge = bill.syncStatus === 'syncing' ? '<span style="font-size:10px;color:var(--text3)">⏳ Syncing...</span>' : bill.syncStatus === 'synced' ? '<span style="font-size:10px;color:var(--accent)">✓ Synced</span>' : '';
+  return `<div class="bill-item" onclick="openBill('${bill.id}')"><div class="bill-icon ${t.color}">${t.icon}</div><div class="bill-info"><div class="bill-name">${t.label}${bill.notes ? ' · ' + bill.notes : ''}</div><div class="bill-meta">${bill.period || dateStr}${bill.consumption ? ' · ' + bill.consumption : ''}</div></div><div style="text-align:right;flex-shrink:0"><div style="font-size:15px;font-weight:600;color:var(--accent)">€${(bill.amount||0).toFixed(2)}</div><div style="font-size:11px;color:var(--text3);margin-top:2px">${syncBadge || bill.addedBy || ''}</div></div></div>`;
 }
 
 function renderBills() {
