@@ -876,7 +876,7 @@ async function extractWithGemini(b64, mimeType) {
   }
   
   debug('🔑 Key: ' + groqKey.substring(0, 12) + '...');
-  debug('  Trying: meta-llama/llama-4-scout-17b-16e-instruct');
+  debug('  Trying: qwen/qwen3.6-27b');
   
   let text = null;
   let lastError = null;
@@ -891,7 +891,8 @@ async function extractWithGemini(b64, mimeType) {
           'Authorization': 'Bearer ' + groqKey
         },
         body: JSON.stringify({
-          model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+          model: 'qwen/qwen3.6-27b',
+          reasoning_effort: 'none',
           messages: [{
             role: 'user',
             content: [
@@ -1010,7 +1011,7 @@ async function testGeminiKey(context) {
   debug('🔧 Testing Groq API Key...');
   debug('Key: ' + groqKey.substring(0, 12) + '...');
   debug('');
-  debug('📡 Testing model: meta-llama/llama-4-scout-17b-16e-instruct');
+  debug('📡 Testing model: qwen/qwen3.6-27b');
   
   let success = false;
   
@@ -1024,7 +1025,8 @@ async function testGeminiKey(context) {
           'Authorization': 'Bearer ' + groqKey
         },
         body: JSON.stringify({
-          model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+          model: 'qwen/qwen3.6-27b',
+          reasoning_effort: 'none',
           messages: [{ role: 'user', content: 'Say "OK"' }],
           max_tokens: 10
         })
