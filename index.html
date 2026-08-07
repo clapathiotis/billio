@@ -212,8 +212,8 @@
           <label class="form-label">Groq API Key</label>
           <input class="form-input" id="gemini-key" placeholder="gsk_...">
         </div>
-        <button class="btn btn-ghost btn-full" style="margin-bottom:8px" onclick="testGeminiKey()">🧪 Test Key (optional)</button>
-        <div id="debug-section" style="display:none;background:var(--bg3);border-radius:12px;padding:12px;margin-bottom:12px;font-size:12px;color:var(--text2);max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;font-family:var(--mono)"></div>
+        <button class="btn btn-ghost btn-full" style="margin-bottom:8px" onclick="testGeminiKey('setup')">🧪 Test Key (optional)</button>
+        <div id="debug-section-setup" style="display:none;background:var(--bg3);border-radius:12px;padding:12px;margin-bottom:12px;font-size:12px;color:var(--text2);max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;font-family:var(--mono)"></div>
         <button class="btn btn-primary btn-full" onclick="saveGemini()">Continue →</button>
         <button class="btn btn-ghost btn-full" style="margin-top:10px" onclick="showStep('step-supabase')">← Back</button>
       </div>
@@ -338,7 +338,7 @@
 
           <div id="extracted-data" style="display:none">
             <div class="alert alert-success" id="extract-result-msg">✓ Details extracted — review and confirm</div>
-            <div id="debug-section" style="display:none;background:var(--bg3);border-radius:12px;padding:12px;margin-bottom:12px;font-size:12px;color:var(--text2);max-height:150px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;font-family:var(--mono)"></div>
+            <div id="debug-section-addbill" style="display:none;background:var(--bg3);border-radius:12px;padding:12px;margin-bottom:12px;font-size:12px;color:var(--text2);max-height:150px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;font-family:var(--mono)"></div>
             <div class="card">
               <div class="card-title">Bill Details</div>
               <div class="form-group">
@@ -476,7 +476,7 @@
           <label class="form-label">Groq API Key</label>
           <input class="form-input" id="cfg-gemini-key" placeholder="gsk_...">
         </div>
-        <button class="btn btn-ghost btn-full" onclick="testGeminiKey()" style="margin-bottom:0">🧪 Test Key</button>
+        <button class="btn btn-ghost btn-full" onclick="testGeminiKey('settings')" style="margin-bottom:0">🧪 Test Key</button>
         <div id="settings-debug-section" style="display:none;background:var(--bg1);border-radius:12px;padding:12px;margin-top:12px;font-size:12px;color:var(--text2);max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;font-family:var(--mono)"></div>
       </div>
       <button class="btn btn-primary btn-full" onclick="saveSettings()">Save Settings</button>
@@ -858,7 +858,7 @@ async function handlePhoto(input) {
 
 async function extractWithGemini(b64, mimeType) {
   const groqKey = ls('gemini_key');
-  const debugEl = document.getElementById('debug-section');
+  const debugEl = document.getElementById('debug-section-addbill');
   debugEl.textContent = '';
   
   function debug(msg) {
@@ -977,13 +977,17 @@ async function extractWithGemini(b64, mimeType) {
   document.getElementById('extracted-data').style.display = 'block';
 }
 
-async function testGeminiKey() {
-  // Try to get key from either settings or setup form
-  let groqKey = document.getElementById('cfg-gemini-key')?.value || 
-                  document.getElementById('gemini-key')?.value ||
-                  ls('gemini_key');
-  
-  const debugEl = document.getElementById('debug-section') || document.getElementById('settings-debug-section');
+async function testGeminiKey(context) {
+  // Resolve the correct input + debug panel pair for whichever screen called this
+  const map = {
+    settings: { input: 'cfg-gemini-key', debug: 'settings-debug-section' },
+    setup:    { input: 'gemini-key',     debug: 'debug-section-setup' }
+  };
+  const ids = map[context] || map.settings;
+
+  let groqKey = document.getElementById(ids.input)?.value || ls('gemini_key');
+
+  const debugEl = document.getElementById(ids.debug);
   if (!debugEl) {
     alert('Debug display not found on this screen');
     return;
