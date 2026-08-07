@@ -1089,9 +1089,10 @@ function saveBill() {
   state.bills.unshift(bill);
   ls('billio_bills', state.bills);
   renderBills(); // Re-render to show "syncing" status
-  syncToSupabase(bill).then(() => {
-    // Update sync status after sync completes
-    state.bills.find(b => b.id === bill.id).syncStatus = 'synced';
+  syncToSupabase(bill).then(ok => {
+    // Reflect the ACTUAL sync outcome, not just "it finished running"
+    state.bills.find(b => b.id === bill.id).syncStatus = ok ? 'synced' : 'sync-failed';
+    ls('billio_bills', state.bills);
     renderBills();
   });
   showScreen('bills');
@@ -1101,7 +1102,7 @@ async function syncToSupabase(bill) {
   const url = ls('sb_url'), key = ls('sb_key');
   if (!url || !key) {
     console.log('Supabase not configured — bill saved locally only');
-    return;
+    return false;
   }
   try {
     let photoUrl = null;
@@ -1130,8 +1131,10 @@ async function syncToSupabase(bill) {
     }
     
     // Save bill to database with correct field mapping
+    // Note: bill.id is a local-only string ("bill_...") used for local state tracking;
+    // the bills table's id column is uuid with a gen_random_uuid() default, so we
+    // must NOT send our local id — let Postgres generate the real UUID.
     const payload = {
-      id: bill.id,
       type: bill.type,
       amount: bill.amount,
       consumption: bill.consumption || null,
@@ -1152,12 +1155,16 @@ async function syncToSupabase(bill) {
     });
     
     if (!saveRes.ok) {
-      console.warn('Bill save to Supabase failed:', saveRes.status, saveRes.statusText);
+      const errBody = await saveRes.text().catch(() => '');
+      console.warn('Bill save to Supabase failed:', saveRes.status, saveRes.statusText, errBody);
+      return false;
     } else {
       console.log('✓ Bill synced to Supabase:', bill.id);
+      return true;
     }
   } catch (e) {
     console.error('Supabase sync error:', e);
+    return false;
   }
 }
 
@@ -1184,7 +1191,7 @@ function billItemHTML(bill) {
   const t = BILL_TYPES[bill.type] || BILL_TYPES.other;
   const d = new Date(bill.date);
   const dateStr = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
-  const syncBadge = bill.syncStatus === 'syncing' ? '<span style="font-size:10px;color:var(--text3)">⏳ Syncing...</span>' : bill.syncStatus === 'synced' ? '<span style="font-size:10px;color:var(--accent)">✓ Synced</span>' : '';
+  const syncBadge = bill.syncStatus === 'syncing' ? '<span style="font-size:10px;color:var(--text3)">⏳ Syncing...</span>' : bill.syncStatus === 'synced' ? '<span style="font-size:10px;color:var(--accent)">✓ Synced</span>' : bill.syncStatus === 'sync-failed' ? '<span style="font-size:10px;color:#f87171">⚠ Not synced — local only</span>' : '';
   return `<div class="bill-item" onclick="openBill('${bill.id}')"><div class="bill-icon ${t.color}">${t.icon}</div><div class="bill-info"><div class="bill-name">${t.label}${bill.notes ? ' · ' + bill.notes : ''}</div><div class="bill-meta">${bill.period || dateStr}${bill.consumption ? ' · ' + bill.consumption : ''}</div></div><div style="text-align:right;flex-shrink:0"><div style="font-size:15px;font-weight:600;color:var(--accent)">€${(bill.amount||0).toFixed(2)}</div><div style="font-size:11px;color:var(--text3);margin-top:2px">${syncBadge || bill.addedBy || ''}</div></div></div>`;
 }
 
